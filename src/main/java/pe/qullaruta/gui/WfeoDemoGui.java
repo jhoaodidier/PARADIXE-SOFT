@@ -7,9 +7,11 @@ import pe.qullaruta.simulator.*;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
-import javax.swing.border.LineBorder;
 import java.awt.*;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.awt.geom.Path2D;
+import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
 import java.math.BigDecimal;
 import java.time.LocalTime;
@@ -18,11 +20,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 100% Java Swing GUI: Panel de Control de Resiliencia Territorial y Simulación WFEO.
- * Incluye:
- * - Alerta acústica sintetizada en memoria con javax.sound.sampled.
- * - Integración de mapas OpenStreetMap con fallback vectorial Offline-First.
- * - Cero dependencias externas (solo JDK estándar).
+ * QULLA-RUTA Navigation HUD (Estilo Waze Moderno — 100% Java Swing / Java2D).
+ * 
+ * Enfoque: Resiliencia Territorial, Alertas Geotécnicas (IVV), Puentes Logísticos y Simulación WFEO.
+ * Características de diseño moderno:
+ * - JLayeredPane con mapa base a pantalla completa (Slippy Map OSM + Offline Vectorial).
+ * - Componentes flotantes Glassmorphic (cabecera turn-by-turn, alerta de peligro, HUD inferior).
+ * - Trazado de ruta con brillo de neón, semáforo de riesgo y cursor vehicular.
+ * - Cero dependencias externas (100% JDK estándar).
  */
 public final class WfeoDemoGui extends JFrame {
 
@@ -47,187 +52,334 @@ public final class WfeoDemoGui extends JFrame {
 
     private final OsmTileProvider tileProvider = new OsmTileProvider();
 
-    // Componentes interactivos
-    private final JLabel lblIvvScore = new JLabel("2.00");
-    private final JLabel lblIvvBadge = new JLabel("GREEN");
-    private final JLabel lblTimeSaved = new JLabel("-- min");
-    private final JLabel lblCo2Saved = new JLabel("-- kg");
-    private final JLabel lblAgriSaved = new JLabel("-- USD");
-    private final JTextArea txtFirewall = new JTextArea();
-    private final CorridorCanvas canvas;
+    // Estado interactivo
+    private boolean isSimulationActive = false;
+    private String selectedVehicle = "AMBULANCE_4X4"; // "AMBULANCE_4X4" o "HEAVY_TRAILER"
+
+    // Componentes del HUD
+    private FullMapCanvas mapCanvas;
+    private JPanel overlayPanel;
+    private JLabel lblTurnHeader;
+    private JLabel lblSubTurn;
+    private JLabel lblIvvBadge;
+    private JPanel hazardAlertCard;
+    private JLabel lblHazardTitle;
+    private JLabel lblHazardDesc;
+    private JLabel lblEtaTime;
+    private JLabel lblEtaDistance;
+    private JLabel lblTimeSavedBadge;
+    private JLabel lblCo2SavedBadge;
+    private JLabel lblAgriSavedBadge;
+    private JButton btnSimulate;
 
     public WfeoDemoGui() {
-        super("QULLA-RUTA — Red Territorial de Resiliencia Vial (100% Java)");
-        this.canvas = new CorridorCanvas(tileProvider);
-
+        super("QULLA-RUTA — Navegador de Resiliencia Vial (Huánuco – Carpish)");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setSize(1120, 740);
+        setSize(1180, 780);
+        setMinimumSize(new Dimension(960, 640));
         setLocationRelativeTo(null);
 
-        initUi();
+        initLayeredUi();
 
-        // Precargar mapa de Carpish de fondo en hilo virtual
-        tileProvider.prefetchCorridorAsync(-9.705, -76.095, 11, canvas::repaint);
+        // Precargar mapa de Carpish de fondo
+        tileProvider.prefetchCorridorAsync(-9.705, -76.095, 11, () -> mapCanvas.repaint());
     }
 
-    private void initUi() {
-        JPanel root = new JPanel(new BorderLayout());
-        root.setBackground(new Color(15, 23, 42)); // Slate 900
+    private void initLayeredUi() {
+        JLayeredPane layeredPane = new JLayeredPane();
+        layeredPane.setLayout(null);
 
-        // Panel Izquierdo: Controles y Métricas
-        JPanel leftPanel = new JPanel();
-        leftPanel.setLayout(new BoxLayout(leftPanel, BoxLayout.Y_AXIS));
-        leftPanel.setBackground(new Color(30, 41, 59)); // Slate 800
-        leftPanel.setBorder(new EmptyBorder(20, 20, 20, 20));
-        leftPanel.setPreferredSize(new Dimension(380, 740));
+        // CAPA 0: Mapa a pantalla completa
+        mapCanvas = new FullMapCanvas(tileProvider);
+        layeredPane.add(mapCanvas, JLayeredPane.DEFAULT_LAYER);
 
-        // Título
-        JLabel title = new JLabel("QULLA-RUTA");
-        title.setFont(new Font("SansSerif", Font.BOLD, 22));
-        title.setForeground(new Color(56, 189, 248)); // Sky 400
-        JLabel subtitle = new JLabel("Simulador de Resiliencia Vial (Huánuco – Carpish)");
-        subtitle.setFont(new Font("SansSerif", Font.PLAIN, 12));
-        subtitle.setForeground(new Color(148, 163, 184)); // Slate 400
+        // CAPA 1: Contenedor flotante transparente estilo Waze
+        overlayPanel = new JPanel(null);
+        overlayPanel.setOpaque(false);
+        layeredPane.add(overlayPanel, JLayeredPane.PALETTE_LAYER);
 
-        leftPanel.add(title);
-        leftPanel.add(subtitle);
-        leftPanel.add(Box.createVerticalStrut(20));
+        buildFloatingWazeComponents();
 
-        // Tarjeta IVV
-        JPanel ivvCard = createCard("Vulnerabilidad Geotécnica (IVV)");
-        lblIvvScore.setFont(new Font("SansSerif", Font.BOLD, 32));
-        lblIvvScore.setForeground(Color.WHITE);
-        lblIvvBadge.setFont(new Font("SansSerif", Font.BOLD, 12));
+        // Ajuste dinámico de dimensiones al redimensionar la ventana
+        addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent e) {
+                int w = getContentPane().getWidth();
+                int h = getContentPane().getHeight();
+                mapCanvas.setBounds(0, 0, w, h);
+                overlayPanel.setBounds(0, 0, w, h);
+                relayoutOverlays(w, h);
+            }
+        });
+
+        setContentPane(layeredPane);
+    }
+
+    private void buildFloatingWazeComponents() {
+        // 1. Barra Superior Flotante: Indicador de Navegación y Próximo Hito
+        JPanel topNavCard = new GlassPanel(16, new Color(18, 24, 38, 235));
+        topNavCard.setLayout(new BorderLayout(15, 0));
+        topNavCard.setBorder(new EmptyBorder(12, 18, 12, 18));
+
+        JLabel iconArrow = new JLabel("⬆️");
+        iconArrow.setFont(new Font("SansSerif", Font.PLAIN, 28));
+
+        JPanel navTextCol = new JPanel(new GridLayout(2, 1, 0, 2));
+        navTextCol.setOpaque(false);
+        lblTurnHeader = new JLabel("Carretera Central (PE-18A) — Hacia Tingo María");
+        lblTurnHeader.setFont(new Font("SansSerif", Font.BOLD, 15));
+        lblTurnHeader.setForeground(Color.WHITE);
+
+        lblSubTurn = new JLabel("A 12 km: Paso por Túnel Carpish • Condiciones Normales");
+        lblSubTurn.setFont(new Font("SansSerif", Font.PLAIN, 12));
+        lblSubTurn.setForeground(new Color(148, 163, 184)); // Slate 400
+
+        navTextCol.add(lblTurnHeader);
+        navTextCol.add(lblSubTurn);
+
+        // Badge de Riesgo Geotécnico IVV (Semáforo Waze)
+        lblIvvBadge = new JLabel("IVV: 2.00 GREEN", SwingConstants.CENTER);
+        lblIvvBadge.setFont(new Font("SansSerif", Font.BOLD, 11));
+        lblIvvBadge.setForeground(new Color(46, 213, 115));
         lblIvvBadge.setOpaque(true);
-        lblIvvBadge.setBackground(new Color(34, 197, 94, 50));
-        lblIvvBadge.setForeground(new Color(34, 197, 94));
-        lblIvvBadge.setBorder(new LineBorder(new Color(34, 197, 94), 1, true));
+        lblIvvBadge.setBackground(new Color(46, 213, 115, 40));
+        lblIvvBadge.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(46, 213, 115), 1, true),
+                new EmptyBorder(4, 10, 4, 10)
+        ));
 
-        JPanel ivvRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
-        ivvRow.setBackground(new Color(51, 65, 85));
-        ivvRow.add(lblIvvScore);
-        ivvRow.add(lblIvvBadge);
-        ivvCard.add(ivvRow);
-        leftPanel.add(ivvCard);
-        leftPanel.add(Box.createVerticalStrut(15));
+        topNavCard.add(iconArrow, BorderLayout.WEST);
+        topNavCard.add(navTextCol, BorderLayout.CENTER);
+        topNavCard.add(lblIvvBadge, BorderLayout.EAST);
+        topNavCard.setName("topNavCard");
+        overlayPanel.add(topNavCard);
 
-        // Botón Simulación con Sirena Acústica
-        JButton btnSimulate = new JButton("⚡ Ejecutar Simulación de Emergencia");
+        // 2. Tarjeta Flotante Lateral de Peligro / Alerta Waze (Aparece al detectar huaico)
+        hazardAlertCard = new GlassPanel(16, new Color(30, 20, 28, 240));
+        hazardAlertCard.setLayout(new BorderLayout(10, 8));
+        hazardAlertCard.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(239, 68, 68), 1, true),
+                new EmptyBorder(14, 16, 14, 16)
+        ));
+
+        JLabel hazardIcon = new JLabel("⚠️");
+        hazardIcon.setFont(new Font("SansSerif", Font.PLAIN, 26));
+
+        JPanel hazardTextCol = new JPanel(new GridLayout(2, 1, 0, 3));
+        hazardTextCol.setOpaque(false);
+        lblHazardTitle = new JLabel("HUAICO Y DERRUMBE CONFIRMADO");
+        lblHazardTitle.setFont(new Font("SansSerif", Font.BOLD, 13));
+        lblHazardTitle.setForeground(new Color(255, 71, 87));
+
+        lblHazardDesc = new JLabel("Km 47 Túnel Carpish • Calzada Bloqueada");
+        lblHazardDesc.setFont(new Font("SansSerif", Font.PLAIN, 12));
+        lblHazardDesc.setForeground(new Color(226, 232, 240));
+
+        hazardTextCol.add(lblHazardTitle);
+        hazardTextCol.add(lblHazardDesc);
+
+        hazardAlertCard.add(hazardIcon, BorderLayout.WEST);
+        hazardAlertCard.add(hazardTextCol, BorderLayout.CENTER);
+        hazardAlertCard.setName("hazardAlertCard");
+        hazardAlertCard.setVisible(false); // Oculto hasta simular
+        overlayPanel.add(hazardAlertCard);
+
+        // 3. HUD Inferior Flotante (ETA, Distancia, Tiempo Ahorrado, Botón Waze)
+        JPanel bottomHud = new GlassPanel(20, new Color(18, 24, 38, 240));
+        bottomHud.setLayout(new BorderLayout(20, 0));
+        bottomHud.setBorder(new EmptyBorder(14, 22, 14, 22));
+
+        // Columna Izquierda: ETA y Distancia
+        JPanel etaCol = new JPanel(new GridLayout(2, 1, 0, 2));
+        etaCol.setOpaque(false);
+        lblEtaTime = new JLabel("14:25 • Llegada");
+        lblEtaTime.setFont(new Font("SansSerif", Font.BOLD, 18));
+        lblEtaTime.setForeground(Color.WHITE);
+
+        lblEtaDistance = new JLabel("135 km restantes • Ruta Troncal");
+        lblEtaDistance.setFont(new Font("SansSerif", Font.PLAIN, 12));
+        lblEtaDistance.setForeground(new Color(148, 163, 184));
+        etaCol.add(lblEtaTime);
+        etaCol.add(lblEtaDistance);
+
+        // Columna Central: Métricas de Resiliencia Territorial (Ahorro)
+        JPanel savingsCol = new JPanel(new FlowLayout(FlowLayout.CENTER, 14, 4));
+        savingsCol.setOpaque(false);
+
+        lblTimeSavedBadge = createPillLabel("⏱️ Sin Demora", new Color(56, 189, 248));
+        lblCo2SavedBadge = createPillLabel("🌱 CO₂ Normal", new Color(46, 213, 115));
+        lblAgriSavedBadge = createPillLabel("📦 Carga Protegida", new Color(245, 158, 11));
+
+        savingsCol.add(lblTimeSavedBadge);
+        savingsCol.add(lblCo2SavedBadge);
+        savingsCol.add(lblAgriSavedBadge);
+
+        // Columna Derecha: Botón de Simulación de Emergencia Estilo Waze
+        JPanel actionCol = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+        actionCol.setOpaque(false);
+
+        // Selector de vehículo (Ambulancia vs Camión Agrícola)
+        JComboBox<String> vehicleSelector = new JComboBox<>(new String[]{"🚑 Ambulancia 4x4", "🚛 Tráiler Agrícola"});
+        vehicleSelector.setFont(new Font("SansSerif", Font.BOLD, 12));
+        vehicleSelector.setBackground(new Color(51, 65, 85));
+        vehicleSelector.setForeground(Color.WHITE);
+        vehicleSelector.addActionListener(e -> {
+            selectedVehicle = vehicleSelector.getSelectedIndex() == 0 ? "AMBULANCE_4X4" : "HEAVY_TRAILER";
+            if (isSimulationActive) {
+                triggerSimulationWorkflow();
+            }
+        });
+
+        btnSimulate = new JButton("⚡ SIMULAR CRISIS WFEO");
         btnSimulate.setFont(new Font("SansSerif", Font.BOLD, 13));
-        btnSimulate.setBackground(new Color(239, 68, 68)); // Red 500
+        btnSimulate.setBackground(new Color(239, 68, 68)); // Rojo Waze Hazard
         btnSimulate.setForeground(Color.WHITE);
         btnSimulate.setFocusPainted(false);
-        btnSimulate.setBorder(new EmptyBorder(12, 14, 12, 14));
         btnSimulate.setCursor(new Cursor(Cursor.HAND_CURSOR));
-        btnSimulate.setMaximumSize(new Dimension(Short.MAX_VALUE, 45));
-        btnSimulate.addActionListener(e -> runSimulation());
-        leftPanel.add(btnSimulate);
-        leftPanel.add(Box.createVerticalStrut(15));
+        btnSimulate.setBorder(new EmptyBorder(10, 18, 10, 18));
+        btnSimulate.addActionListener(e -> triggerSimulationWorkflow());
 
-        // Tarjeta Métricas de Impacto
-        JPanel impactCard = createCard("Impacto Socioeconómico (Δ ∈ ℝ)");
-        impactCard.add(createMetricRow("Tiempo Ahorrado:", lblTimeSaved));
-        impactCard.add(createMetricRow("CO2 Evitado:", lblCo2Saved));
-        impactCard.add(createMetricRow("Carga Agrícola:", lblAgriSaved));
-        leftPanel.add(impactCard);
-        leftPanel.add(Box.createVerticalStrut(15));
+        actionCol.add(vehicleSelector);
+        actionCol.add(btnSimulate);
 
-        // Tarjeta Notification Firewall Audit
-        JPanel firewallCard = createCard("Notification Firewall (Aislamiento)");
-        txtFirewall.setEditable(false);
-        txtFirewall.setFont(new Font("Monospaced", Font.PLAIN, 11));
-        txtFirewall.setBackground(new Color(9, 13, 22));
-        txtFirewall.setForeground(new Color(165, 243, 252));
-        txtFirewall.setText("[FIREWALL ACTIVO]\nContención estricta.\nCero fugas a producción.");
-        JScrollPane scroll = new JScrollPane(txtFirewall);
-        scroll.setPreferredSize(new Dimension(340, 90));
-        scroll.setBorder(new LineBorder(new Color(71, 85, 105), 1));
-        firewallCard.add(scroll);
-        leftPanel.add(firewallCard);
-
-        root.add(leftPanel, BorderLayout.WEST);
-        root.add(canvas, BorderLayout.CENTER);
-
-        setContentPane(root);
+        bottomHud.add(etaCol, BorderLayout.WEST);
+        bottomHud.add(savingsCol, BorderLayout.CENTER);
+        bottomHud.add(actionCol, BorderLayout.EAST);
+        bottomHud.setName("bottomHud");
+        overlayPanel.add(bottomHud);
     }
 
-    private JPanel createCard(String titleText) {
-        JPanel card = new JPanel();
-        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
-        card.setBackground(new Color(51, 65, 85));
-        card.setBorder(new EmptyBorder(10, 12, 10, 12));
-        card.setMaximumSize(new Dimension(Short.MAX_VALUE, 160));
-
-        JLabel title = new JLabel(titleText.toUpperCase());
-        title.setFont(new Font("SansSerif", Font.BOLD, 10));
-        title.setForeground(new Color(148, 163, 184));
-        card.add(title);
-        card.add(Box.createVerticalStrut(8));
-        return card;
+    private JLabel createPillLabel(String text, Color accent) {
+        JLabel lbl = new JLabel(text);
+        lbl.setFont(new Font("SansSerif", Font.BOLD, 11));
+        lbl.setForeground(accent);
+        lbl.setOpaque(true);
+        lbl.setBackground(new Color(accent.getRed(), accent.getGreen(), accent.getBlue(), 35));
+        lbl.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(accent, 1, true),
+                new EmptyBorder(4, 10, 4, 10)
+        ));
+        return lbl;
     }
 
-    private JPanel createMetricRow(String labelText, JLabel valLabel) {
-        JPanel row = new JPanel(new BorderLayout());
-        row.setBackground(new Color(51, 65, 85));
-        JLabel lbl = new JLabel(labelText);
-        lbl.setFont(new Font("SansSerif", Font.PLAIN, 12));
-        lbl.setForeground(new Color(226, 232, 240));
-
-        valLabel.setFont(new Font("SansSerif", Font.BOLD, 13));
-        valLabel.setForeground(new Color(34, 197, 94));
-
-        row.add(lbl, BorderLayout.WEST);
-        row.add(valLabel, BorderLayout.EAST);
-        return row;
+    private void relayoutOverlays(int w, int h) {
+        for (Component c : overlayPanel.getComponents()) {
+            if ("topNavCard".equals(c.getName())) {
+                int cardWidth = Math.min(w - 60, 780);
+                c.setBounds((w - cardWidth) / 2, 20, cardWidth, 65);
+            } else if ("hazardAlertCard".equals(c.getName())) {
+                c.setBounds(30, 95, 420, 75);
+            } else if ("bottomHud".equals(c.getName())) {
+                int hudWidth = w - 60;
+                c.setBounds(30, h - 95, hudWidth, 75);
+            }
+        }
     }
 
-    private void runSimulation() {
-        // Disparar sirena acústica de emergencia (asíncrona)
+    private void triggerSimulationWorkflow() {
+        isSimulationActive = true;
+
+        // 1. Alerta Acústica de Emergencia (Sirena de 2 tonos en hilo virtual)
         EmergencyAudioAlert.playEmergencySirenAsync();
 
+        // 2. Ejecutar Simulación Geotécnica y de Ruteo
         WfeoDemoRunner runner = new WfeoDemoRunner(model, impactParams, firewall);
         WfeoDemoResult res = runner.runCarpishEmergencyScenario();
 
-        // Actualizar UI
-        lblIvvScore.setText(res.ivvScore().toString());
-        lblIvvBadge.setText(res.riskLevel().name());
-        lblIvvBadge.setForeground(new Color(239, 68, 68));
-        lblIvvBadge.setBackground(new Color(239, 68, 68, 50));
-        lblIvvBadge.setBorder(new LineBorder(new Color(239, 68, 68), 1, true));
+        // 3. Actualizar Visualización Estilo Waze
+        lblIvvBadge.setText("IVV: " + res.ivvScore() + " RED");
+        lblIvvBadge.setForeground(new Color(255, 71, 87));
+        lblIvvBadge.setBackground(new Color(255, 71, 87, 45));
+        lblIvvBadge.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(255, 71, 87), 1, true),
+                new EmptyBorder(4, 10, 4, 10)
+        ));
 
-        lblTimeSaved.setText("+" + res.trailerImpact().timeDeltaMin() + " min");
-        lblCo2Saved.setText("+" + res.trailerImpact().netCo2DeltaKg() + " kg");
-        lblAgriSaved.setText("+$" + res.trailerImpact().netAgriSavingsUsd() + " USD");
+        // Activar tarjeta flotante de peligro
+        hazardAlertCard.setVisible(true);
+        if ("AMBULANCE_4X4".equals(selectedVehicle)) {
+            lblHazardTitle.setText("⚠️ HUAICO EN CARPISH — DESVÍO ACTIVADO");
+            lblHazardDesc.setText("Ambulancia 4x4 redirigida por Trocha Chinchao (+15 km)");
+            lblEtaTime.setText("14:48 • Desvío Asignado");
+            lblEtaDistance.setText("150 km restantes • Ruta Alterna Verificada");
+            lblTurnHeader.setText("Desvío Autorizado: Trocha Chinchao (Corredor Seguro)");
+            lblSubTurn.setText("Paso prioritario humanitario • Evita zona de peligro");
+        } else {
+            lblHazardTitle.setText("⛔ BLOQUEO TOTAL — PUENTE LOGÍSTICO");
+            lblHazardDesc.setText("Camión pesado no apto para trocha. Transbordo seguro.");
+            lblEtaTime.setText("16:30 • En Espera de Transbordo");
+            lblEtaDistance.setText("Km 47 • Zona de Espera Geotécnicamente Estable");
+            lblTurnHeader.setText("Detención Segura: Zona de Relevo y Transbordo");
+            lblSubTurn.setText("Sendero peatonal certificado por Defensa Civil fuera de huaico");
+        }
 
-        String time = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
-        txtFirewall.setText("[" + time + "] ESCENARIO: Carpish Emergency\n" +
-                "[FIREWALL AUDIT] Interceptado despacho a SMS/WhatsApp\n" +
-                "[RUTEO] Ambulancia: ALTERNATE_ROUTE\n" +
-                "[RUTEO] Tráiler: LOGISTIC_BRIDGE_REQUIRED\n" +
-                "[BARRERA] 0 mensajes a producción.");
+        // Actualizar badges de impacto de resiliencia
+        lblTimeSavedBadge.setText("⏱️ Ahorro: +" + res.trailerImpact().timeDeltaMin().intValue() + " min");
+        lblCo2SavedBadge.setText("🌱 Evitado: +" + res.trailerImpact().netCo2DeltaKg() + " kg CO₂");
+        lblAgriSavedBadge.setText("📦 Salvado: +$" + res.trailerImpact().netAgriSavingsUsd() + " USD");
 
-        canvas.setSimulationActive(true);
-        canvas.repaint();
+        btnSimulate.setText("⚡ CRISIS ACTIVA (WFEO)");
+        btnSimulate.setBackground(new Color(255, 71, 87));
 
-        // Tono de confirmación de resolución de ruta
+        // Actualizar lienzo de navegación
+        mapCanvas.setSimulationState(true, selectedVehicle);
+        mapCanvas.repaint();
+
+        // 4. Tono de Confirmación Armónico
         EmergencyAudioAlert.playRouteResolvedChimeAsync();
     }
 
     /**
-     * Lienzo gráfico que combina teselas OpenStreetMap (cuando hay red)
-     * con fallback vectorial topográfico Offline-First.
+     * Panel con fondo semitransparente Glassmorphism y bordes redondeados.
      */
-    static class CorridorCanvas extends JPanel {
-        private boolean isSimulationActive = false;
-        private final OsmTileProvider tileProvider;
+    static class GlassPanel extends JPanel {
+        private final int cornerRadius;
+        private final Color bgColor;
 
-        public CorridorCanvas(OsmTileProvider tileProvider) {
+        public GlassPanel(int radius, Color bgColor) {
+            this.cornerRadius = radius;
+            this.bgColor = bgColor;
+            setOpaque(false);
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+            // Sombra suave
+            g2.setColor(new Color(0, 0, 0, 70));
+            g2.fill(new RoundRectangle2D.Double(2, 2, getWidth() - 4, getHeight() - 4, cornerRadius, cornerRadius));
+
+            // Fondo translúcido
+            g2.setColor(bgColor);
+            g2.fill(new RoundRectangle2D.Double(0, 0, getWidth() - 1, getHeight() - 1, cornerRadius, cornerRadius));
+
+            // Borde sutil
+            g2.setColor(new Color(255, 255, 255, 30));
+            g2.draw(new RoundRectangle2D.Double(0, 0, getWidth() - 1, getHeight() - 1, cornerRadius, cornerRadius));
+
+            g2.dispose();
+            super.paintComponent(g);
+        }
+    }
+
+    /**
+     * Lienzo de navegación a pantalla completa: mapa satelital/OSM con trazado de ruta neón.
+     */
+    static class FullMapCanvas extends JPanel {
+        private final OsmTileProvider tileProvider;
+        private boolean isSimulationActive = false;
+        private String vehicleType = "AMBULANCE_4X4";
+
+        public FullMapCanvas(OsmTileProvider tileProvider) {
             this.tileProvider = tileProvider;
             setBackground(new Color(15, 23, 42));
         }
 
-        public void setSimulationActive(boolean active) {
+        public void setSimulationState(boolean active, String vehicleType) {
             this.isSimulationActive = active;
+            this.vehicleType = vehicleType;
         }
 
         @Override
@@ -239,81 +391,134 @@ public final class WfeoDemoGui extends JFrame {
             int w = getWidth();
             int h = getHeight();
 
-            // 1. Capa de Fondo: OpenStreetMap Tile (si está en caché o disponible)
+            // 1. Fondo: Tesela OpenStreetMap (con oscurecimiento tipo modo nocturno Waze)
             int centerX = OsmTileProvider.lonToTileX(-76.095, 11);
             int centerY = OsmTileProvider.latToTileY(-9.705, 11);
             BufferedImage tile = tileProvider.getTile(11, centerX, centerY);
 
             if (tile != null) {
-                // Dibujar tesela OSM con oscurecimiento para preservar contraste del dashboard
                 g2.drawImage(tile, 0, 0, w, h, null);
-                g2.setColor(new Color(15, 23, 42, 190)); // Capa semitransparente oscura
+                // Filtro azul oscuro tipo Waze Dark Navigation
+                g2.setColor(new Color(15, 23, 42, 210));
                 g2.fillRect(0, 0, w, h);
             } else {
-                // Fallback Offline-First: Renderizado vectorial de montañas de los Andes
-                g2.setColor(new Color(30, 41, 59));
+                // Fallback Offline: Relieve de cordillera
+                g2.setColor(new Color(24, 32, 47));
                 Path2D mountains = new Path2D.Double();
-                mountains.moveTo(0, h * 0.7);
-                mountains.curveTo(w * 0.2, h * 0.4, w * 0.4, h * 0.8, w * 0.6, h * 0.3);
-                mountains.curveTo(w * 0.8, h * 0.5, w * 0.9, h * 0.2, w, h * 0.6);
+                mountains.moveTo(0, h * 0.75);
+                mountains.curveTo(w * 0.25, h * 0.45, w * 0.5, h * 0.85, w * 0.75, h * 0.35);
+                mountains.curveTo(w * 0.85, h * 0.5, w * 0.95, h * 0.3, w, h * 0.7);
                 mountains.lineTo(w, h);
                 mountains.lineTo(0, h);
                 mountains.closePath();
                 g2.fill(mountains);
             }
 
-            // 2. Trazado Vial Carretera Central (Huánuco -> Carpish -> Tingo María)
-            g2.setStroke(new BasicStroke(6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-            if (isSimulationActive) {
-                // Tramo Huánuco -> Carpish Sur (Verde)
-                g2.setColor(new Color(34, 197, 94));
-                g2.drawLine(w / 8, h / 2, w * 3 / 8, h / 2);
+            int roadY = h / 2 + 30;
 
-                // Tramo Túnel Carpish bloqueado (Rojo punteado)
-                g2.setColor(new Color(239, 68, 68));
-                float[] dash = {10f, 10f};
-                g2.setStroke(new BasicStroke(6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 10f, dash, 0f));
-                g2.drawLine(w * 3 / 8, h / 2, w * 5 / 8, h / 2);
+            // 2. Trazado de Carretera Principal
+            if (!isSimulationActive) {
+                // Estado Normal: Línea Waze Cyan Brillante
+                drawGlowLine(g2, w / 8, roadY, w * 7 / 8, roadY, new Color(0, 210, 255), 8f);
+            } else {
+                // Tramo Huánuco -> Carpish Sur (Transitable)
+                drawGlowLine(g2, w / 8, roadY, w * 3 / 8, roadY, new Color(0, 210, 255), 8f);
+
+                // Tramo Túnel Carpish (Huaico / Bloqueo en Rojo Alerta)
+                g2.setColor(new Color(255, 71, 87));
+                float[] dash = {12f, 10f};
+                g2.setStroke(new BasicStroke(8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 10f, dash, 0f));
+                g2.drawLine(w * 3 / 8, roadY, w * 5 / 8, roadY);
 
                 // Tramo Carpish Norte -> Tingo María
-                g2.setStroke(new BasicStroke(6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                g2.setColor(new Color(34, 197, 94));
-                g2.drawLine(w * 5 / 8, h / 2, w * 7 / 8, h / 2);
+                drawGlowLine(g2, w * 5 / 8, roadY, w * 7 / 8, roadY, new Color(46, 213, 115), 8f);
 
-                // Ruta alterna desvío seguro (Ambulancia)
-                g2.setColor(new Color(56, 189, 248));
-                g2.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                Path2D bypass = new Path2D.Double();
-                bypass.moveTo(w * 3 / 8, h / 2);
-                bypass.curveTo(w * 4 / 8, h / 2 - 120, w * 4 / 8, h / 2 - 120, w * 5 / 8, h / 2);
-                g2.draw(bypass);
+                // Si es Ambulancia: Renderizar Desvío de Trocha Chinchao (Curva Cyan)
+                if ("AMBULANCE_4X4".equals(vehicleType)) {
+                    Path2D detour = new Path2D.Double();
+                    detour.moveTo(w * 3 / 8, roadY);
+                    detour.curveTo(w * 4 / 8, roadY - 140, w * 4 / 8, roadY - 140, w * 5 / 8, roadY);
 
-                g2.setFont(new Font("SansSerif", Font.BOLD, 12));
-                g2.drawString("Desvío Ambulancia 4x4 (Trocha segura)", w * 4 / 8 - 110, h / 2 - 130);
-            } else {
-                g2.setColor(new Color(34, 197, 94));
-                g2.drawLine(w / 8, h / 2, w * 7 / 8, h / 2);
+                    // Resplandor
+                    g2.setColor(new Color(0, 210, 255, 70));
+                    g2.setStroke(new BasicStroke(12f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                    g2.draw(detour);
+
+                    g2.setColor(new Color(0, 210, 255));
+                    g2.setStroke(new BasicStroke(5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                    g2.draw(detour);
+
+                    // Etiqueta del desvío
+                    g2.setFont(new Font("SansSerif", Font.BOLD, 12));
+                    g2.setColor(new Color(56, 189, 248));
+                    g2.drawString("Ruta Alterna Ambulancia (Trocha Chinchao)", w * 4 / 8 - 120, roadY - 150);
+                }
             }
 
-            // Nodos territoriales
-            drawNode(g2, w / 8, h / 2, "Huánuco (Km 0)", new Color(56, 189, 248));
-            drawNode(g2, w * 4 / 8, h / 2, isSimulationActive ? "Túnel Carpish (Huaico RED)" : "Túnel Carpish (Normal)",
-                    isSimulationActive ? new Color(239, 68, 68) : new Color(34, 197, 94));
-            drawNode(g2, w * 7 / 8, h / 2, "Tingo María (Km 135)", new Color(56, 189, 248));
+            // 3. Marcadores de Nodos Territoriales Estilo Waze
+            drawWazePin(g2, w / 8, roadY, "Huánuco", new Color(56, 189, 248), "🏙️");
+            drawWazePin(g2, w * 4 / 8, roadY, isSimulationActive ? "Huaico Carpish" : "Túnel Carpish",
+                    isSimulationActive ? new Color(255, 71, 87) : new Color(46, 213, 115),
+                    isSimulationActive ? "⚠️" : "🚇");
+            drawWazePin(g2, w * 7 / 8, roadY, "Tingo María", new Color(56, 189, 248), "🏁");
+
+            // 4. Cursor Vehicular Waze (Navegando)
+            int cursorX = isSimulationActive ? (w * 3 / 8 - 10) : (w / 4);
+            int cursorY = roadY;
+            drawCarCursor(g2, cursorX, cursorY);
 
             g2.dispose();
         }
 
-        private void drawNode(Graphics2D g2, int x, int y, String label, Color color) {
+        private void drawGlowLine(Graphics2D g2, int x1, int y1, int x2, int y2, Color color, float width) {
+            // Capa de resplandor (Glow)
+            g2.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), 60));
+            g2.setStroke(new BasicStroke(width + 6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g2.drawLine(x1, y1, x2, y2);
+
+            // Línea central sólida
             g2.setColor(color);
-            g2.fillOval(x - 10, y - 10, 20, 20);
+            g2.setStroke(new BasicStroke(width, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g2.drawLine(x1, y1, x2, y2);
+        }
+
+        private void drawWazePin(Graphics2D g2, int x, int y, String label, Color color, String emoji) {
+            // Círculo exterior
+            g2.setColor(color);
+            g2.fillOval(x - 16, y - 16, 32, 32);
             g2.setColor(Color.WHITE);
             g2.setStroke(new BasicStroke(2f));
-            g2.drawOval(x - 10, y - 10, 20, 20);
+            g2.drawOval(x - 16, y - 16, 32, 32);
 
+            // Icono central
+            g2.setFont(new Font("SansSerif", Font.PLAIN, 14));
+            g2.drawString(emoji, x - 7, y + 5);
+
+            // Etiqueta flotante
             g2.setFont(new Font("SansSerif", Font.BOLD, 12));
-            g2.setColor(new Color(241, 245, 249));
-            g2.drawString(label, x - 50, y + 28);
+            g2.setColor(Color.WHITE);
+            FontMetrics fm = g2.getFontMetrics();
+            int textW = fm.stringWidth(label);
+            g2.setColor(new Color(15, 23, 42, 200));
+            g2.fillRoundRect(x - textW / 2 - 6, y + 22, textW + 12, 20, 8, 8);
+            g2.setColor(Color.WHITE);
+            g2.drawString(label, x - textW / 2, y + 36);
+        }
+
+        private void drawCarCursor(Graphics2D g2, int x, int y) {
+            // Cursor vehicular tipo flecha de navegación Waze
+            g2.setColor(new Color(0, 210, 255));
+            Path2D arrow = new Path2D.Double();
+            arrow.moveTo(x + 12, y);
+            arrow.lineTo(x - 8, y - 8);
+            arrow.lineTo(x - 4, y);
+            arrow.lineTo(x - 8, y + 8);
+            arrow.closePath();
+            g2.fill(arrow);
+
+            g2.setColor(Color.WHITE);
+            g2.setStroke(new BasicStroke(1.5f));
+            g2.draw(arrow);
         }
     }
 
@@ -324,4 +529,3 @@ public final class WfeoDemoGui extends JFrame {
         });
     }
 }
-
