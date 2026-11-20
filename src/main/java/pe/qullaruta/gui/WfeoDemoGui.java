@@ -1,6 +1,8 @@
 package pe.qullaruta.gui;
 
+import pe.qullaruta.audio.EmergencyAudioAlert;
 import pe.qullaruta.ivv.*;
+import pe.qullaruta.map.OsmTileProvider;
 import pe.qullaruta.simulator.*;
 
 import javax.swing.*;
@@ -8,6 +10,7 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
 import java.awt.*;
 import java.awt.geom.Path2D;
+import java.awt.image.BufferedImage;
 import java.math.BigDecimal;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
@@ -16,7 +19,10 @@ import java.util.List;
 
 /**
  * 100% Java Swing GUI: Panel de Control de Resiliencia Territorial y Simulación WFEO.
- * Cumple estrictamente la restricción: CERO lenguajes externos (solo JDK estándar).
+ * Incluye:
+ * - Alerta acústica sintetizada en memoria con javax.sound.sampled.
+ * - Integración de mapas OpenStreetMap con fallback vectorial Offline-First.
+ * - Cero dependencias externas (solo JDK estándar).
  */
 public final class WfeoDemoGui extends JFrame {
 
@@ -39,6 +45,8 @@ public final class WfeoDemoGui extends JFrame {
             log -> firewallLogs.add(log)
     );
 
+    private final OsmTileProvider tileProvider = new OsmTileProvider();
+
     // Componentes interactivos
     private final JLabel lblIvvScore = new JLabel("2.00");
     private final JLabel lblIvvBadge = new JLabel("GREEN");
@@ -46,15 +54,20 @@ public final class WfeoDemoGui extends JFrame {
     private final JLabel lblCo2Saved = new JLabel("-- kg");
     private final JLabel lblAgriSaved = new JLabel("-- USD");
     private final JTextArea txtFirewall = new JTextArea();
-    private final CorridorCanvas canvas = new CorridorCanvas();
+    private final CorridorCanvas canvas;
 
     public WfeoDemoGui() {
         super("QULLA-RUTA — Red Territorial de Resiliencia Vial (100% Java)");
+        this.canvas = new CorridorCanvas(tileProvider);
+
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setSize(1080, 720);
+        setSize(1120, 740);
         setLocationRelativeTo(null);
 
         initUi();
+
+        // Precargar mapa de Carpish de fondo en hilo virtual
+        tileProvider.prefetchCorridorAsync(-9.705, -76.095, 11, canvas::repaint);
     }
 
     private void initUi() {
@@ -66,7 +79,7 @@ public final class WfeoDemoGui extends JFrame {
         leftPanel.setLayout(new BoxLayout(leftPanel, BoxLayout.Y_AXIS));
         leftPanel.setBackground(new Color(30, 41, 59)); // Slate 800
         leftPanel.setBorder(new EmptyBorder(20, 20, 20, 20));
-        leftPanel.setPreferredSize(new Dimension(380, 720));
+        leftPanel.setPreferredSize(new Dimension(380, 740));
 
         // Título
         JLabel title = new JLabel("QULLA-RUTA");
@@ -98,7 +111,7 @@ public final class WfeoDemoGui extends JFrame {
         leftPanel.add(ivvCard);
         leftPanel.add(Box.createVerticalStrut(15));
 
-        // Botón Simulación
+        // Botón Simulación con Sirena Acústica
         JButton btnSimulate = new JButton("⚡ Ejecutar Simulación de Emergencia");
         btnSimulate.setFont(new Font("SansSerif", Font.BOLD, 13));
         btnSimulate.setBackground(new Color(239, 68, 68)); // Red 500
@@ -127,7 +140,7 @@ public final class WfeoDemoGui extends JFrame {
         txtFirewall.setForeground(new Color(165, 243, 252));
         txtFirewall.setText("[FIREWALL ACTIVO]\nContención estricta.\nCero fugas a producción.");
         JScrollPane scroll = new JScrollPane(txtFirewall);
-        scroll.setPreferredSize(new Dimension(340, 100));
+        scroll.setPreferredSize(new Dimension(340, 90));
         scroll.setBorder(new LineBorder(new Color(71, 85, 105), 1));
         firewallCard.add(scroll);
         leftPanel.add(firewallCard);
@@ -169,6 +182,9 @@ public final class WfeoDemoGui extends JFrame {
     }
 
     private void runSimulation() {
+        // Disparar sirena acústica de emergencia (asíncrona)
+        EmergencyAudioAlert.playEmergencySirenAsync();
+
         WfeoDemoRunner runner = new WfeoDemoRunner(model, impactParams, firewall);
         WfeoDemoResult res = runner.runCarpishEmergencyScenario();
 
@@ -192,15 +208,21 @@ public final class WfeoDemoGui extends JFrame {
 
         canvas.setSimulationActive(true);
         canvas.repaint();
+
+        // Tono de confirmación de resolución de ruta
+        EmergencyAudioAlert.playRouteResolvedChimeAsync();
     }
 
     /**
-     * Lienzo gráfico 100% Java (Java2D) que renderiza el mapa del corredor vial.
+     * Lienzo gráfico que combina teselas OpenStreetMap (cuando hay red)
+     * con fallback vectorial topográfico Offline-First.
      */
     static class CorridorCanvas extends JPanel {
         private boolean isSimulationActive = false;
+        private final OsmTileProvider tileProvider;
 
-        public CorridorCanvas() {
+        public CorridorCanvas(OsmTileProvider tileProvider) {
+            this.tileProvider = tileProvider;
             setBackground(new Color(15, 23, 42));
         }
 
@@ -217,18 +239,30 @@ public final class WfeoDemoGui extends JFrame {
             int w = getWidth();
             int h = getHeight();
 
-            // Fondo topográfico cordillera de Carpish
-            g2.setColor(new Color(30, 41, 59));
-            Path2D mountains = new Path2D.Double();
-            mountains.moveTo(0, h * 0.7);
-            mountains.curveTo(w * 0.2, h * 0.4, w * 0.4, h * 0.8, w * 0.6, h * 0.3);
-            mountains.curveTo(w * 0.8, h * 0.5, w * 0.9, h * 0.2, w, h * 0.6);
-            mountains.lineTo(w, h);
-            mountains.lineTo(0, h);
-            mountains.closePath();
-            g2.fill(mountains);
+            // 1. Capa de Fondo: OpenStreetMap Tile (si está en caché o disponible)
+            int centerX = OsmTileProvider.lonToTileX(-76.095, 11);
+            int centerY = OsmTileProvider.latToTileY(-9.705, 11);
+            BufferedImage tile = tileProvider.getTile(11, centerX, centerY);
 
-            // Trazado Vial Carretera Central (Huánuco -> Tingo María)
+            if (tile != null) {
+                // Dibujar tesela OSM con oscurecimiento para preservar contraste del dashboard
+                g2.drawImage(tile, 0, 0, w, h, null);
+                g2.setColor(new Color(15, 23, 42, 190)); // Capa semitransparente oscura
+                g2.fillRect(0, 0, w, h);
+            } else {
+                // Fallback Offline-First: Renderizado vectorial de montañas de los Andes
+                g2.setColor(new Color(30, 41, 59));
+                Path2D mountains = new Path2D.Double();
+                mountains.moveTo(0, h * 0.7);
+                mountains.curveTo(w * 0.2, h * 0.4, w * 0.4, h * 0.8, w * 0.6, h * 0.3);
+                mountains.curveTo(w * 0.8, h * 0.5, w * 0.9, h * 0.2, w, h * 0.6);
+                mountains.lineTo(w, h);
+                mountains.lineTo(0, h);
+                mountains.closePath();
+                g2.fill(mountains);
+            }
+
+            // 2. Trazado Vial Carretera Central (Huánuco -> Carpish -> Tingo María)
             g2.setStroke(new BasicStroke(6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
             if (isSimulationActive) {
                 // Tramo Huánuco -> Carpish Sur (Verde)
@@ -290,3 +324,4 @@ public final class WfeoDemoGui extends JFrame {
         });
     }
 }
+

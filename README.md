@@ -14,6 +14,8 @@ Sistema de predicción geotécnica, detección de incidentes y enrutamiento resi
 4. **Orquestador Demo WFEO (`E2E-01`):** Simulación integral de emergencia en Carpish con ruteo multimodal (ambulancia vs. camión pesado) en menos de 50 ms.
 5. **Servidor HTTP REST (`/api/v1`):** Endpoints nativos reactivos para recálculo de $IVV$, mapas GeoJSON y gestión de simulaciones.
 6. **Interfaz CLI JSON (`stdin` / `stdout`):** Invocación directa del motor mediante tuberías JSON para integración modular.
+7. **Alertas Acústicas de Emergencia (`javax.sound`):** Síntesis de ondas PCM en memoria para sirenas de evacuación y confirmación de ruteo seguro (100% Java estándar).
+8. **Mapas Territoriales OpenStreetMap:** Proveedor de teselas satelitales/OSM con arquitectura de degradación elegante *Offline-First* ante pérdida de conexión.
 
 ---
 
