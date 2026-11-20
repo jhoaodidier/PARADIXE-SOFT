@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f7f6ef">
+<title>Qulla-Ruta · Project atlas</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='8' fill='%23263f32'/%3E%3Cpath d='m5 28 9-16 6 11 6-14 10 19M9 29l5-9 5 9m5-7 3-5 6 11' fill='none' stroke='%23eeefda' stroke-width='2'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="presentacion.css">
+<script defer src="presentacion.js"></script>
+</head>
+<body>
+<svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+<symbol id="mount" viewBox="0 0 40 40"><path d="m4 28 9-16 7 11 7-15 10 20M9 29l4.4-8 5.2 8m5-5 3.8-8 6.3 12M5 32h30"/></symbol>
+<symbol id="grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+<symbol id="full" viewBox="0 0 24 24"><path d="M8 4H4v4m12-4h4v4M4 16v4h4m12-4v4h-4"/></symbol>
+<symbol id="arrow" viewBox="0 0 24 24"><path d="M4 12h16m-6-6 6 6-6 6"/></symbol>
+<symbol id="x" viewBox="0 0 24 24"><path d="m6 6 12 12m0-12L6 18"/></symbol>
+<symbol id="pin" viewBox="0 0 24 24"><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 0 1 14 0Z"/><circle cx="12" cy="10" r="2.2"/></symbol>
+<symbol id="layers" viewBox="0 0 24 24"><path d="m2 8 10-5 10 5-10 5-10-5Zm1 5 9 4.5 9-4.5M3 18l9 4.5 9-4.5"/></symbol>
+<symbol id="signal" viewBox="0 0 24 24"><path d="M2 13h5l3-8 4 14 3-8 2 2h3"/></symbol>
+<symbol id="route" viewBox="0 0 24 24"><circle cx="5" cy="18" r="2.5"/><circle cx="19" cy="5" r="2.5"/><path d="M5 15.5v-4a3 3 0 0 1 3-3h5m6-1v5a3 3 0 0 1-3 3h-4"/></symbol>
+<symbol id="ambulance" viewBox="0 0 24 24"><path d="M2 7h12v10H2zm12 3h4l4 4v3h-8M6 11h5m-2.5-2.5v5"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></symbol>
+<symbol id="truck" viewBox="0 0 24 24"><path d="M2 6h13v11H2zm13 4h4l3 4v3h-7"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></symbol>
+</defs></svg>
+<header>
+  <div class="brand"><span class="brandmark"><svg class="icon"><use href="#mount"/></svg></span>Qulla-Ruta</div>
+  <span class="header-sub">Project atlas</span>
+  <nav aria-label="Presentation tools">
+    <button id="open-index" aria-haspopup="dialog" title="Slide index (I)"><svg class="icon"><use href="#grid"/></svg><span>Index</span></button>
+    <button id="fullscreen" title="Full screen (F)" aria-label="Full screen" aria-pressed="false"><svg class="icon"><use href="#full"/></svg><span>Full screen</span></button>
+  </nav>
+</header>
+<main id="deck" aria-label="Qulla-Ruta project presentation" aria-roledescription="presentation">
+<section class="slide active" data-name="Overview" aria-labelledby="t1">
+  <div class="layout">
+    <div class="copy">
+      <p class="chapter"><i></i> Project overview</p>
+      <h1 id="t1">Qulla<span>-</span><em>Ruta</em></h1>
+      <p class="lead">Road resilience and emergency logistics in the Peruvian Andes.</p>
+      <p class="body">When a landslide cuts the road through Carpish, how can patients and perishable freight keep moving?</p>
+      <button class="primary" id="start">Explore the corridor <svg class="icon"><use href="#arrow"/></svg></button>
+    </div>
+    <figure class="plate map-plate">
+      <figcaption><span class="fig-number">FIG. 01</span> Corridor terrain</figcaption>
+      <div class="map-window">
+        <div class="north" aria-hidden="true">N<span>↑</span></div>
+        <div class="terrain" data-map="cover"></div>
+        <div class="scale" aria-hidden="true"></div>
+      </div>
+      <div class="plate-foot"><span><b class="swatch"></b> Pilot corridor</span><span>Schematic view</span></div>
+    </figure>
+  </div>
+</section>
+<section class="slide" data-name="The corridor" aria-labelledby="t2" hidden>
+  <div class="layout"><div class="copy">
+    <p class="chapter"><i></i> The corridor</p><h2 id="t2">When the road <br><em>closes.</em></h2>
+    <p class="lead">The road through Carpish links the Huánuco highlands with the rainforest around Tingo María.</p>
+    <p class="body">A single landslide can delay an ambulance and strand a truckload of fresh produce. The two vehicles need different ways through.</p>
+  </div>
+  <figure class="plate map-plate"><figcaption><span class="fig-number">FIG. 02</span> Landslide location</figcaption>
+    <div class="map-window"><div class="north" aria-hidden="true">N<span>↑</span></div><div class="terrain" data-map="incident"></div><div class="scale" aria-hidden="true"></div></div>
+    <div class="plate-foot"><span><b class="dot"></b> Carpish road closure</span><span>Simulated event</span></div>
+  </figure></div>
+</section>
+<section class="slide" data-name="System design" aria-labelledby="t3" hidden>
+  <div class="layout"><div class="copy">
+    <p class="chapter"><i></i> System design</p><h2 id="t3">From a signal <br>to a <em>decision.</em></h2>
+    <p class="lead">The proposed system answers three questions before a vehicle moves.</p>
+    <p class="body">It is designed for intermittent connectivity. Field crews and local authorities verify conditions and make the operational decisions.</p>
+  </div>
+  <figure class="plate"><figcaption><span class="fig-number">FIG. 03</span> Proposed architecture</figcaption>
+    <div class="sequence">
+      <div class="step"><svg class="icon"><use href="#layers"/></svg><div><small>LAYER 01</small><h3>How exposed is the road?</h3><p>Combine rainfall with the terrain along each road segment.</p></div></div>
+      <div class="step"><svg class="icon"><use href="#signal"/></svg><div><small>LAYER 02</small><h3>Is the road blocked?</h3><p>Cross-check GPS signals with community reports.</p></div></div>
+      <div class="step"><svg class="icon"><use href="#route"/></svg><div><small>LAYER 03</small><h3>Which vehicles can pass?</h3><p>Match vehicle limits to verified routes.</p></div></div>
+    </div>
+  </figure></div>
+</section>
+<section class="slide" data-name="Road index" aria-labelledby="t4" hidden>
+  <div class="layout"><div class="copy">
+    <p class="chapter"><i></i> Road vulnerability</p><h2 id="t4">What makes a road <br><em>vulnerable?</em></h2>
+    <p class="lead">The Road Vulnerability Index (IVV) combines four factors into a score from 0 to 100.</p>
+    <p class="body">Rainfall carries the most weight. The Java prototype uses fixed weights, so the same inputs and model version give the same score.</p>
+  </div>
+  <figure class="plate"><figcaption><span class="fig-number">FIG. 04</span> How the index is weighted</figcaption>
+    <div class="weights">
+      <div class="weight-strip" aria-hidden="true"></div>
+      <dl class="weight-key">
+        <div><dt>Accumulated rainfall</dt><dd>40%</dd></div>
+        <div><dt>Slope and ravine proximity</dt><dd>30%</dd></div>
+        <div><dt>Soil susceptibility</dt><dd>20%</dd></div>
+        <div><dt>Historical trouble spots</dt><dd>10%</dd></div>
+      </dl>
+    </div>
+    <div class="plate-foot"><span>Demo model</span><span>Share of score</span></div>
+  </figure></div>
+</section>
+<section class="slide" data-name="Simulation" aria-labelledby="t5" hidden>
+  <div class="layout"><div class="copy">
+    <p class="chapter"><i></i> Carpish simulation</p><h2 id="t5">Heavy rain <br>at <em>Carpish.</em></h2>
+    <p class="lead">With 95 mm of rain in 24 hours and 210 mm in 72 hours, the simulated road segment scores 91.27.</p>
+    <p class="body">The red band begins at 70. The demo then introduces a landslide. Its notification firewall logs the alert and blocks delivery to real users.</p>
+  </div>
+  <figure class="plate score-plate"><figcaption><span class="fig-number">FIG. 05</span> Road segment reading</figcaption>
+    <div class="score-box"><small>IVV · CARPISH</small><div class="score">91.27<span> / 100</span></div>
+      <div class="risk-scale"><i></i></div><div class="ticks"><span>0</span><span>40</span><span>70</span><span>100</span></div>
+      <div class="risk-label"><b class="dot"></b> Red risk level</div>
+    </div><div class="plate-foot"><span>Java prototype</span><span>Synthetic inputs</span></div>
+  </figure></div>
+</section>
+<section class="slide" data-name="Vehicle response" aria-labelledby="t6" hidden>
+  <div class="layout"><div class="copy">
+    <p class="chapter"><i></i> Vehicle response</p><h2 id="t6">One closure, <br>two <em>responses.</em></h2>
+    <p class="lead">A rural detour can take a 4×4 ambulance yet be too narrow for a heavy truck.</p>
+    <p class="body">The Carpish scenario illustrates both outcomes. A real cargo transfer requires a corridor with a current field inspection.</p>
+  </div>
+  <figure class="plate"><figcaption><span class="fig-number">FIG. 06</span> Simulated routes</figcaption>
+    <div class="vehicles">
+      <div>
+        <svg class="vehicle-scene" viewBox="0 0 170 66" aria-hidden="true">
+          <path class="detour-track" d="M12 46h36c14 0 12-24 28-24h24c17 0 15 24 31 24h25"/>
+          <g transform="translate(144 44)"><g class="detour-drive"><circle r="14"/><use href="#ambulance" x="-10" y="-10" width="20" height="20"/></g></g>
+        </svg>
+        <small>4×4 AMBULANCE</small><h3>Local detour</h3><p>The ambulance continues on a gravel road.</p>
+      </div>
+      <div>
+        <svg class="vehicle-scene" viewBox="0 0 170 66" aria-hidden="true">
+          <path class="handoff-track" d="M30 32Q79 -9 120 32"/>
+          <use class="parked" href="#truck" x="12" y="29" width="40" height="32"/>
+          <use class="parked" href="#truck" x="103" y="29" width="40" height="32"/>
+          <g transform="translate(120 32)"><g class="cargo-crate"><rect x="-5" y="-5" width="10" height="10" rx="1"/><path d="M-2-4v3h4v-3"/></g></g>
+        </svg>
+        <small>FREIGHT TRUCK</small><h3>Cargo transfer</h3><p>The load changes vehicles at a transfer point.</p>
+      </div>
+    </div>
+  </figure></div>
+</section>
+<section class="slide" data-name="Impact" aria-labelledby="t7" hidden>
+  <div class="layout"><div class="copy">
+    <p class="chapter"><i></i> Simulated impact</p><h2 id="t7">Twelve hours <br><em>saved.</em></h2>
+    <p class="lead">In the simulation, transferring the load takes 2 hours. Waiting for the road to reopen takes 14.</p>
+    <p class="body">The estimate includes 15 km of extra driving and produce lost during handling. Both assumptions affect the result.</p>
+  </div>
+  <figure class="plate"><figcaption><span class="fig-number">FIG. 07</span> Cost of waiting</figcaption>
+  <div class="impact"><div class="time-bars"><div><span>Wait for reopening</span><b>14 h</b><div class="hour-cells" aria-hidden="true"></div></div><div><span>Transfer the load</span><b>2 h</b><div class="hour-cells" data-transfer aria-hidden="true"></div></div></div>
+  <div class="outcomes"><div><strong>18.5 <small>kg</small></strong><p>Less CO₂ emitted</p></div><div><strong>9,810 <small>USD</small></strong><p>Avoided crop losses</p></div></div></div>
+  <div class="plate-foot"><span>WFEO simulation</span><span>Agricultural freight</span></div></figure></div>
+</section>
+<section class="slide" data-name="Next steps" aria-labelledby="t8" hidden>
+  <div class="layout"><div class="copy">
+    <p class="chapter"><i></i> Field validation</p><h2 id="t8">Taking the model <br><em>into the field.</em></h2>
+    <p class="lead">The Java prototype can replay the Carpish scenario. Testing it against local observations is the next step.</p>
+    <p class="body">Field teams would compare risk scores with recorded incidents and inspect the places where patients or cargo could change vehicles.</p>
+    <button class="primary" id="restart">Back to the start <svg class="icon"><use href="#arrow"/></svg></button>
+  </div><figure class="plate field-sheet">
+    <figcaption><span class="fig-number">FIG. 08</span> Field validation plan</figcaption>
+    <div class="field-notes">
+      <div class="field-heading"><small>CARPISH / FIELD NOTES</small><h3>What to verify</h3></div>
+      <ol><li><span>01</span> Compare scores with local landslide records.</li>
+        <li><span>02</span> Measure detour width, slope and load limits.</li>
+        <li><span>03</span> Inspect transfer points with field crews.</li></ol>
+      <div class="field-stamp">Proposed fieldwork</div>
+    </div>
+  </figure></div>
+</section>
+</main>
+<footer>
+  <div class="page-label"><strong id="page">01</strong><span class="total">/ 08</span><span id="page-name">Overview</span></div>
+  <nav id="progress" aria-label="Jump to a slide"></nav>
+  <div class="navigation"><button id="previous" title="Previous (←)" aria-label="Previous slide"><svg class="icon"><use href="#arrow"/></svg></button><button id="next" title="Next (→)" aria-label="Next slide"><svg class="icon"><use href="#arrow"/></svg></button></div>
+</footer>
+<dialog id="contents" aria-labelledby="contents-title"><div class="dialog-head"><h2 id="contents-title">Slide index</h2><button id="close-index" title="Close (Esc)" aria-label="Close index"><svg class="icon"><use href="#x"/></svg></button></div><nav id="chapters" aria-label="Presentation index"></nav></dialog>
+<p id="announcement" class="sr-only" aria-live="polite" aria-atomic="true"></p>
+</body></html>

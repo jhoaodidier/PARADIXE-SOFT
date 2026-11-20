@@ -90,11 +90,7 @@ public final class WfeoDemoRunner {
         );
     }
 
-    public static void main(String[] args) {
-        System.out.println("================================================================================");
-        System.out.println("          QULLA-RUTA: RED TERRITORIAL DE RESILIENCIA VIAL (WFEO DEMO)");
-        System.out.println("================================================================================");
-
+    public static WfeoDemoRunner forPresentation(NotificationFirewall firewall) {
         IvvModelVersion modelV1 = new IvvModelVersion(
                 "ivv-v1.0-rainy-andes",
                 new BigDecimal("0.400"), new BigDecimal("0.300"), new BigDecimal("0.200"), new BigDecimal("0.100"),
@@ -112,12 +108,20 @@ public final class WfeoDemoRunner {
                 new BigDecimal("0.080")
         );
 
+        return new WfeoDemoRunner(modelV1, trailerParams, firewall);
+    }
+
+    public static void main(String[] args) {
+        System.out.println("================================================================================");
+        System.out.println("          QULLA-RUTA: RED TERRITORIAL DE RESILIENCIA VIAL (WFEO DEMO)");
+        System.out.println("================================================================================");
+
         NotificationFirewall firewall = new NotificationFirewall(
                 (phone, msg) -> System.out.println("[PROD GATEWAY ERROR] " + phone + " -> " + msg),
                 simLog -> System.out.println("  [FIREWALL AUDIT] " + simLog)
         );
 
-        WfeoDemoRunner runner = new WfeoDemoRunner(modelV1, trailerParams, firewall);
+        WfeoDemoRunner runner = forPresentation(firewall);
         WfeoDemoResult res = runner.runCarpishEmergencyScenario();
 
         System.out.println("Escenario ID: " + res.scenarioId());
