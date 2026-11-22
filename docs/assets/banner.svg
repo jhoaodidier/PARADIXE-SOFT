@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" role="img" aria-label="PARADIXE SOFT — Red Territorial de Resiliencia Vial y Logística Crítica">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#07111f"/>
+      <stop offset="55%" stop-color="#0b243b"/>
+      <stop offset="100%" stop-color="#0c3c54"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="50%" stop-color="#22c55e"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="300" rx="18" fill="url(#bg)"/>
+
+  <!-- Contornos topograficos estilizados -->
+  <g fill="none" stroke="#1e4969" stroke-width="1.5" opacity="0.65">
+    <path d="M-40 245 Q 180 180, 410 220 T 860 190 T 1240 230"/>
+    <path d="M-40 215 Q 200 140, 440 185 T 890 145 T 1240 195"/>
+    <path d="M-40 185 Q 220 100, 470 150 T 920 105 T 1240 160"/>
+    <path d="M-40 275 Q 190 225, 430 255 T 870 230 T 1240 265"/>
+  </g>
+
+  <!-- Red de corredor resiliente -->
+  <g fill="none" stroke-linecap="round">
+    <path d="M815 215 L915 150 L1020 170 L1115 95" stroke="#38bdf8" stroke-width="3.5" opacity="0.9"/>
+    <path d="M915 150 L975 90 L1115 95" stroke="#22c55e" stroke-width="2.5" stroke-dasharray="7 6" opacity="0.9"/>
+    <path d="M915 150 L1020 170" stroke="#f59e0b" stroke-width="4" opacity="0.95"/>
+  </g>
+  <g>
+    <circle cx="815" cy="215" r="7" fill="#38bdf8"/>
+    <circle cx="915" cy="150" r="8" fill="#f59e0b"/>
+    <circle cx="975" cy="90" r="6" fill="#22c55e"/>
+    <circle cx="1020" cy="170" r="7" fill="#ef4444"/>
+    <circle cx="1115" cy="95" r="8" fill="#22c55e"/>
+  </g>
+
+  <!-- Insignia TakumiSoft -->
+  <rect x="72" y="54" width="166" height="30" rx="15" fill="#0f3452" stroke="#38bdf8" stroke-width="1.2"/>
+  <text x="155" y="74" text-anchor="middle" fill="#bae6fd" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="700" letter-spacing="1.6">TAKUMISOFT</text>
+
+  <!-- Titulo principal -->
+  <text x="72" y="148" fill="#f8fafc" font-family="system-ui, -apple-system, sans-serif" font-size="56" font-weight="800" letter-spacing="1.5">PARADIXE SOFT</text>
+  <rect x="72" y="166" width="320" height="4" rx="2" fill="url(#accent)"/>
+
+  <!-- Subtitulo -->
+  <text x="72" y="204" fill="#cbd5e1" font-family="system-ui, -apple-system, sans-serif" font-size="20" font-weight="500">
+    Red Territorial de Resiliencia Vial y Logistica Critica
+  </text>
+  <text x="72" y="236" fill="#94a3b8" font-family="system-ui, -apple-system, sans-serif" font-size="15" font-weight="500">
+    Rust Core  ·  PostgreSQL 16 + PostGIS 3.4  ·  Offline-First PWA  ·  Fail-Safe Routing
+  </text>
+</svg>
