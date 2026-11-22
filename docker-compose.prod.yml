@@ -1,0 +1,154 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: paradixe-prod-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-paradixe_soft}
+      POSTGRES_USER: ${POSTGRES_USER:-paradixe_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - paradixe_prod_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rustfs-init:
+    image: alpine:latest
+    container_name: paradixe-prod-rustfs-init
+    user: root
+    command: ["sh", "-c", "chown -R 10001:10001 /data /app/logs"]
+    volumes:
+      - paradixe_prod_s3_data:/data
+      - paradixe_prod_s3_logs:/app/logs
+    restart: "no"
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: paradixe-prod-rustfs
+    restart: unless-stopped
+    security_opt:
+      - "no-new-privileges:true"
+    depends_on:
+      rustfs-init:
+        condition: service_completed_successfully
+    environment:
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "false"
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY:?Set S3_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_KEY:?Set S3_SECRET_KEY}
+    volumes:
+      - paradixe_prod_s3_data:/data
+      - paradixe_prod_s3_logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.rust
+    image: paradixe/core-rust:latest
+    container_name: paradixe-prod-api
+    restart: unless-stopped
+    command: ["paradixe-api"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_ENV: production
+      RUST_LOG: ${RUST_LOG:-info,paradixe_api=info,sqlx=warn}
+      API_BIND_ADDR: 0.0.0.0:8080
+      DATABASE_URL: postgres://${POSTGRES_USER:-paradixe_app}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-paradixe_soft}
+      SIMULATOR_DATABASE_URL: postgres://${SIMULATOR_DB_USER:-paradixe_sim_ro}:${SIMULATOR_DB_PASSWORD:?Set SIMULATOR_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-paradixe_soft}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+      OTP_SECRET: ${OTP_SECRET:?Set OTP_SECRET}
+      WHATSAPP_WEBHOOK_SECRET: ${WHATSAPP_WEBHOOK_SECRET:?Set WHATSAPP_WEBHOOK_SECRET}
+      TELEMETRY_KEY_STORE_DIR: /app/telemetry_keys
+      S3_ENDPOINT: http://rustfs:9000
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET_TILES: ${S3_BUCKET_TILES:-paradixe-tiles}
+    volumes:
+      - paradixe_prod_telemetry_keys:/app/telemetry_keys
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  messaging:
+    image: paradixe/core-rust:latest
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.rust
+    container_name: paradixe-prod-messaging
+    restart: unless-stopped
+    command: ["paradixe-messaging", "serve"]
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      RUST_LOG: ${RUST_LOG:-info,paradixe_messaging=info}
+      MESSAGING_BIND_ADDR: 0.0.0.0:8090
+      PARADIXE_API_URL: http://api:8080/api/v1
+      PARADIXE_DEFAULT_REGION: ${PARADIXE_DEFAULT_REGION:-PE-HUC}
+      WHATSAPP_API_URL: ${WHATSAPP_API_URL:-https://graph.facebook.com/v21.0}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:?Set WHATSAPP_VERIFY_TOKEN}
+      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
+      WHATSAPP_WEBHOOK_SECRET: ${WHATSAPP_WEBHOOK_SECRET}
+      SMS_PROVIDER_URL: ${SMS_PROVIDER_URL:-}
+      SMS_PROVIDER_API_KEY: ${SMS_PROVIDER_API_KEY:-}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  weather-worker:
+    image: paradixe/core-rust:latest
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.rust
+    container_name: paradixe-prod-weather-worker
+    restart: unless-stopped
+    command: ["paradixe-ingestor", "weather-sync", "--interval-hours", "2"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      RUST_LOG: info,paradixe_ingestor=info,sqlx=warn
+      DATABASE_URL: postgres://${POSTGRES_USER:-paradixe_app}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-paradixe_soft}
+      OPEN_METEO_BASE_URL: ${OPEN_METEO_BASE_URL:-https://api.open-meteo.com/v1}
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.web
+    image: paradixe/web:latest
+    container_name: paradixe-prod-web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      messaging:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-8088}:80"
+
+volumes:
+  paradixe_prod_pgdata:
+  paradixe_prod_s3_data:
+  paradixe_prod_s3_logs:
+  paradixe_prod_telemetry_keys:

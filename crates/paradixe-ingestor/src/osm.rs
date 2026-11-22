@@ -270,6 +270,18 @@ fn split_ways_layer_aware(
     edges
 }
 
+fn format_district_ubigeo_code(ubigeo_opt: Option<&str>, kind: char, osm_id: i64) -> String {
+    if let Some(raw) = ubigeo_opt {
+        if let Some(first) = raw.split(';').next() {
+            let cleaned = first.trim();
+            if !cleaned.is_empty() && cleaned.chars().count() <= 16 {
+                return cleaned.to_string();
+            }
+        }
+    }
+    format!("O{kind}{:x}", osm_id.unsigned_abs() & 0x00FF_FFFF_FFFF_FFFF)
+}
+
 fn find_containing_province(
     lon: f64,
     lat: f64,
@@ -574,9 +586,7 @@ pub async fn ingest_osm_region(
     // Seed OSM district units (boundary relations first, supplemented by city/town nodes).
     let mut seen_district_names: HashSet<String> = HashSet::new();
     for (rel_id, dname, ubigeo_opt, lon, lat) in &district_rels {
-        let code = ubigeo_opt
-            .clone()
-            .unwrap_or_else(|| format!("OSM-{}-R{rel_id}", region.ubigeo_code));
+        let code = format_district_ubigeo_code(ubigeo_opt.as_deref(), 'R', *rel_id);
         let parent = find_containing_province(*lon, *lat, &provinces, region_unit_id);
         let box_wkt = crate::regions::BBox {
             min_lon: lon - 0.08,
@@ -614,10 +624,7 @@ pub async fn ingest_osm_region(
         if matches!(p.place_kind.as_str(), "city" | "town")
             && !seen_district_names.contains(&p.name.to_ascii_lowercase())
         {
-            let code = p
-                .ubigeo_tag
-                .clone()
-                .unwrap_or_else(|| format!("OSM-{}-N{}", region.ubigeo_code, p.osm_id));
+            let code = format_district_ubigeo_code(p.ubigeo_tag.as_deref(), 'N', p.osm_id);
             let parent = find_containing_province(p.lon, p.lat, &provinces, region_unit_id);
             let box_wkt = crate::regions::BBox {
                 min_lon: p.lon - 0.06,
@@ -1035,5 +1042,28 @@ mod tests {
         assert_eq!(infer_direction_type(Some("yes"), None), "ONE_WAY");
         assert_eq!(infer_direction_type(None, Some("roundabout")), "ONE_WAY");
         assert_eq!(infer_direction_type(None, None), "BIDIRECTIONAL");
+    }
+
+    #[test]
+    fn district_ubigeo_code_always_fits_varchar_16() {
+        assert_eq!(
+            format_district_ubigeo_code(Some("250101"), 'R', 99),
+            "250101"
+        );
+        assert_eq!(
+            format_district_ubigeo_code(Some("250101;250102;250103"), 'R', 99),
+            "250101"
+        );
+        let long_fallback = format_district_ubigeo_code(
+            Some("valor_extremadamente_largo_invalido"),
+            'N',
+            12_345_678_901,
+        );
+        assert!(long_fallback.len() <= 16);
+        assert!(long_fallback.starts_with("ON"));
+
+        let none_fallback = format_district_ubigeo_code(None, 'N', 12_345_678_901);
+        assert!(none_fallback.len() <= 16);
+        assert!(none_fallback.starts_with("ON"));
     }
 }

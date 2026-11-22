@@ -230,6 +230,207 @@ const HUANUCO_PROVINCES: &[ProvinceSpec] = &[
     },
 ];
 
+const PASCO_PROVINCES: &[ProvinceSpec] = &[
+    ProvinceSpec {
+        ubigeo_code: "1901",
+        name: "Pasco",
+        bbox: BBox {
+            min_lon: -76.70,
+            min_lat: -11.15,
+            max_lon: -75.60,
+            max_lat: -10.40,
+        },
+        capital_lon: -76.2561,
+        capital_lat: -10.6836,
+    },
+    ProvinceSpec {
+        ubigeo_code: "1902",
+        name: "Daniel Alcides Carrion",
+        bbox: BBox {
+            min_lon: -76.68,
+            min_lat: -10.72,
+            max_lon: -76.12,
+            max_lat: -10.22,
+        },
+        capital_lon: -76.5125,
+        capital_lat: -10.4936,
+    },
+    ProvinceSpec {
+        ubigeo_code: "1903",
+        name: "Oxapampa",
+        bbox: BBox {
+            min_lon: -75.85,
+            min_lat: -10.95,
+            max_lon: -74.20,
+            max_lat: -9.40,
+        },
+        capital_lon: -75.4017,
+        capital_lat: -10.5775,
+    },
+];
+
+const JUNIN_PROVINCES: &[ProvinceSpec] = &[
+    ProvinceSpec {
+        ubigeo_code: "1201",
+        name: "Huancayo",
+        bbox: BBox {
+            min_lon: -75.55,
+            min_lat: -12.68,
+            max_lon: -74.75,
+            max_lat: -11.80,
+        },
+        capital_lon: -75.2049,
+        capital_lat: -12.0651,
+    },
+    ProvinceSpec {
+        ubigeo_code: "1202",
+        name: "Concepcion",
+        bbox: BBox {
+            min_lon: -75.55,
+            min_lat: -12.05,
+            max_lon: -74.70,
+            max_lat: -11.40,
+        },
+        capital_lon: -75.3125,
+        capital_lat: -11.9186,
+    },
+    ProvinceSpec {
+        ubigeo_code: "1203",
+        name: "Chanchamayo",
+        bbox: BBox {
+            min_lon: -75.65,
+            min_lat: -11.35,
+            max_lon: -74.85,
+            max_lat: -10.65,
+        },
+        capital_lon: -75.3267,
+        capital_lat: -11.0544,
+    },
+    ProvinceSpec {
+        ubigeo_code: "1204",
+        name: "Jauja",
+        bbox: BBox {
+            min_lon: -75.95,
+            min_lat: -12.00,
+            max_lon: -75.15,
+            max_lat: -11.35,
+        },
+        capital_lon: -75.4967,
+        capital_lat: -11.7758,
+    },
+    ProvinceSpec {
+        ubigeo_code: "1205",
+        name: "Junin",
+        bbox: BBox {
+            min_lon: -76.30,
+            min_lat: -11.45,
+            max_lon: -75.65,
+            max_lat: -10.85,
+        },
+        capital_lon: -75.9925,
+        capital_lat: -11.1586,
+    },
+    ProvinceSpec {
+        ubigeo_code: "1206",
+        name: "Satipo",
+        bbox: BBox {
+            min_lon: -75.05,
+            min_lat: -12.35,
+            max_lon: -73.40,
+            max_lat: -10.80,
+        },
+        capital_lon: -74.6383,
+        capital_lat: -11.2528,
+    },
+    ProvinceSpec {
+        ubigeo_code: "1207",
+        name: "Tarma",
+        bbox: BBox {
+            min_lon: -76.00,
+            min_lat: -11.62,
+            max_lon: -75.35,
+            max_lat: -11.12,
+        },
+        capital_lon: -75.6908,
+        capital_lat: -11.4189,
+    },
+    ProvinceSpec {
+        ubigeo_code: "1208",
+        name: "Yauli",
+        bbox: BBox {
+            min_lon: -76.50,
+            min_lat: -11.95,
+            max_lon: -75.80,
+            max_lat: -11.20,
+        },
+        capital_lon: -75.9014,
+        capital_lat: -11.5236,
+    },
+    ProvinceSpec {
+        ubigeo_code: "1209",
+        name: "Chupaca",
+        bbox: BBox {
+            min_lon: -75.75,
+            min_lat: -12.40,
+            max_lon: -75.20,
+            max_lat: -11.95,
+        },
+        capital_lon: -75.2889,
+        capital_lat: -12.0619,
+    },
+];
+
+const UCAYALI_PROVINCES: &[ProvinceSpec] = &[
+    ProvinceSpec {
+        ubigeo_code: "2501",
+        name: "Coronel Portillo",
+        bbox: BBox {
+            min_lon: -75.25,
+            min_lat: -9.55,
+            max_lon: -72.90,
+            max_lat: -7.80,
+        },
+        capital_lon: -74.5539,
+        capital_lat: -8.3792,
+    },
+    ProvinceSpec {
+        ubigeo_code: "2502",
+        name: "Atalaya",
+        bbox: BBox {
+            min_lon: -74.55,
+            min_lat: -11.45,
+            max_lon: -72.25,
+            max_lat: -9.35,
+        },
+        capital_lon: -73.7536,
+        capital_lat: -10.7294,
+    },
+    ProvinceSpec {
+        ubigeo_code: "2503",
+        name: "Padre Abad",
+        bbox: BBox {
+            min_lon: -75.95,
+            min_lat: -9.45,
+            max_lon: -74.75,
+            max_lat: -7.30,
+        },
+        capital_lon: -75.5094,
+        capital_lat: -9.0389,
+    },
+    ProvinceSpec {
+        ubigeo_code: "2504",
+        name: "Purus",
+        bbox: BBox {
+            min_lon: -72.55,
+            min_lat: -11.20,
+            max_lon: -70.45,
+            max_lat: -9.35,
+        },
+        capital_lon: -70.7069,
+        capital_lat: -9.7764,
+    },
+];
+
 pub fn resolve_region(
     region_code: &str,
     custom_bbox: Option<&str>,
@@ -240,8 +441,8 @@ pub fn resolve_region(
         let code_upper = region_code.trim().to_ascii_uppercase();
         let slug = code_upper.to_ascii_lowercase().replace('_', "-");
         return Ok(RegionSpec {
-            iso_code: code_upper.clone(),
-            ubigeo_code: format!("CUSTOM-{code_upper}"),
+            iso_code: code_upper.chars().take(16).collect(),
+            ubigeo_code: format!("C-{code_upper}").chars().take(16).collect(),
             name: custom_name
                 .map(str::to_string)
                 .unwrap_or_else(|| code_upper.clone()),
@@ -279,7 +480,7 @@ pub fn resolve_region(
                 max_lat: -9.40,
             },
             center_zoom: 8,
-            provinces: Vec::new(),
+            provinces: PASCO_PROVINCES.to_vec(),
         }),
         "PE-JUN" | "JUNIN" => Ok(RegionSpec {
             iso_code: "PE-JUN".to_string(),
@@ -293,7 +494,7 @@ pub fn resolve_region(
                 max_lat: -10.65,
             },
             center_zoom: 8,
-            provinces: Vec::new(),
+            provinces: JUNIN_PROVINCES.to_vec(),
         }),
         "PE-UCA" | "UCAYALI" => Ok(RegionSpec {
             iso_code: "PE-UCA".to_string(),
@@ -307,7 +508,7 @@ pub fn resolve_region(
                 max_lat: -7.30,
             },
             center_zoom: 7,
-            provinces: Vec::new(),
+            provinces: UCAYALI_PROVINCES.to_vec(),
         }),
         "PE-SAM" | "SAN-MARTIN" => Ok(RegionSpec {
             iso_code: "PE-SAM".to_string(),
@@ -412,7 +613,12 @@ pub async fn seed_region_hierarchy(
              RETURNING unit_id",
         )
         .bind(prov.ubigeo_code)
-        .bind(format!("{}-{}", region.iso_code, prov.ubigeo_code))
+        .bind(
+            format!("{}-{}", region.iso_code, prov.ubigeo_code)
+                .chars()
+                .take(16)
+                .collect::<String>(),
+        )
         .bind(region_unit_id)
         .bind(prov.name)
         .bind(prov.bbox.polygon_wkt())

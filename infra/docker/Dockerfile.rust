@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1
+
+FROM rust:1-bookworm AS builder
+WORKDIR /build
+
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ ./crates/
+COPY openapi/ ./openapi/
+
+RUN cargo build --release --locked \
+    -p paradixe-api \
+    -p paradixe-messaging \
+    -p paradixe-ingestor
+
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 10001 paradixe \
+    && useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin paradixe
+
+WORKDIR /app
+
+COPY --from=builder /build/target/release/paradixe-api /usr/local/bin/paradixe-api
+COPY --from=builder /build/target/release/paradixe-messaging /usr/local/bin/paradixe-messaging
+COPY --from=builder /build/target/release/paradixe-ingestor /usr/local/bin/paradixe-ingestor
+COPY migrations/ /app/migrations/
+COPY scripts/ /app/scripts/
+
+RUN mkdir -p /app/telemetry_keys /app/data/raw /app/data/processed \
+    && chown -R 10001:10001 /app
+
+USER 10001:10001
+
+EXPOSE 8080 8090
+CMD ["paradixe-api"]

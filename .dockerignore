@@ -1,0 +1,12 @@
+/target/
+apps/web/node_modules/
+apps/web/dist/
+apps/web/coverage/
+data/
+telemetry_keys/
+.git/
+.env
+.env.*
+*.log
+*.pmtiles
+*.osm.pbf
