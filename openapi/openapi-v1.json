@@ -1,0 +1,1506 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "PARADIXE SOFT API",
+    "version": "2.0.0",
+    "description": "Red Territorial de Resiliencia Vial y Logistica Critica (TakumiSoft). Contrato canonico de produccion /api/v1."
+  },
+  "servers": [
+    {
+      "url": "/api/v1",
+      "description": "API Core PARADIXE SOFT"
+    }
+  ],
+  "security": [
+    {
+      "BearerAuth": []
+    }
+  ],
+  "paths": {
+    "/auth/otp/request": {
+      "post": {
+        "operationId": "requestOtp",
+        "summary": "Solicita desafio OTP (respuesta indistinguible para evitar enumeracion)",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/OtpRequestInput" }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Solicitud aceptada",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/OtpRequestResponse" }
+              }
+            }
+          },
+          "422": { "$ref": "#/components/responses/ValidationError" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "operationId": "login",
+        "summary": "Autentica mediante telefono + OTP o password y emite tokens",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LoginRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tokens emitidos",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthTokenResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "422": { "$ref": "#/components/responses/ValidationError" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "operationId": "refreshSession",
+        "summary": "Rota refresh token; reuso revoca toda la token_family_id",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RefreshRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Nueva pareja de tokens",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthTokenResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "summary": "Revoca el refresh token del dispositivo actual",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RefreshRequest" }
+            }
+          }
+        },
+        "responses": {
+          "204": { "description": "Sesion cerrada" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/auth/revoke-all": {
+      "post": {
+        "operationId": "revokeAllSessions",
+        "summary": "Revoca todas las sesiones activas y audita en audit_logs",
+        "responses": {
+          "204": { "description": "Todas las sesiones revocadas" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/sync/snapshot": {
+      "get": {
+        "operationId": "getSyncSnapshot",
+        "summary": "Sincronizacion diferencial ordenada por change_seq confirmado",
+        "parameters": [
+          {
+            "name": "since_version",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "format": "int64", "minimum": 0, "default": 0 }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 500 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pagina de eventos de sincronizacion",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SyncSnapshotResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/sync/batch": {
+      "post": {
+        "operationId": "postSyncBatch",
+        "summary": "Procesa outbox_queue offline de reportes y pings de forma idempotente",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SyncBatchRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resultado por elemento sincronizado",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SyncBatchResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/corridors/map": {
+      "get": {
+        "operationId": "getCorridorsMap",
+        "summary": "Devuelve GeoJSON de tramos verificados con IVV vigente o UNKNOWN/is_stale",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "FeatureCollection GeoJSON de corredores viales",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CorridorMapFeatureCollection" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ivv/recalculate": {
+      "post": {
+        "operationId": "recalculateIvv",
+        "summary": "Registra observaciones climaticas y recalcula IVV con modelo activo",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/IvvRecalculateRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Evaluaciones IVV calculadas",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/IvvRecalculateResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/telemetry/pings": {
+      "post": {
+        "operationId": "ingestTelemetryPings",
+        "summary": "Ingesta pings seudonimos con rotacion diaria HMAC-SHA256",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TelemetryIngestRequest" }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Lote procesado sin almacenar user_id ni client_ephemeral_id",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TelemetryIngestResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/reports": {
+      "post": {
+        "operationId": "createFieldReport",
+        "summary": "Crea reporte comunitario con validacion espacial PostGIS y consenso",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/FieldReportCreateRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Reporte registrado",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/FieldReportResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/webhooks/messaging": {
+      "post": {
+        "operationId": "receiveMessagingWebhook",
+        "summary": "Ingesta reporte estructurado desde WhatsApp Cloud API / SMS firmado HMAC",
+        "security": [
+          {
+            "WebhookHmac": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/MessagingWebhookRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Confirmacion ligera para mensajeria",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/MessagingWebhookResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/incidents/{incident_id}/verification": {
+      "patch": {
+        "operationId": "verifyIncident",
+        "summary": "Transiciona estado de verificacion y transitabilidad de un incidente",
+        "parameters": [
+          {
+            "name": "incident_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/IncidentVerificationRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Incidente actualizado",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/IncidentResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/routing/calculate": {
+      "post": {
+        "operationId": "calculateRoute",
+        "summary": "Calcula ruta de apoyo a decision, propuesta de puente logistico o NO_SAFE_ROUTE",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RoutingCalculateRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resolucion discriminada del motor de enrutamiento",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RoutingCalculateResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/bridges": {
+      "post": {
+        "operationId": "proposeLogisticBridge",
+        "summary": "Registra plan de puente logistico en estado inicial PROPOSED",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateBridgeRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Puente logistico propuesto",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/LogisticBridgeResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/bridges/{bridge_id}/status": {
+      "patch": {
+        "operationId": "updateBridgeStatus",
+        "summary": "Transiciona estado de puente logistico tras aprobacion humana autorizada",
+        "parameters": [
+          {
+            "name": "bridge_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateBridgeStatusRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Estado actualizado",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/LogisticBridgeResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/incidents/{incident_id}/humanitarian-windows": {
+      "post": {
+        "operationId": "createHumanitarianWindow",
+        "summary": "Autoriza ventana direccional prioritaria sobre incidente PARTIAL_ONE_LANE",
+        "parameters": [
+          {
+            "name": "incident_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateHumanitarianWindowRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Ventana humanitaria creada",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HumanitarianWindowResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/simulator/scenarios": {
+      "post": {
+        "operationId": "createSimulationScenario",
+        "summary": "Crea escenario aislado de simulacro desde fixture inmutable",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateScenarioRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Escenario de simulacro creado",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ScenarioResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/simulator/scenarios/{scenario_id}/events": {
+      "post": {
+        "operationId": "injectSimulationEvent",
+        "summary": "Inyecta exactamente una variante de evento sintetico en simulacro",
+        "parameters": [
+          {
+            "name": "scenario_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SimEventRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Evento de simulacro registrado sin efectos en produccion",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SimEventResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/simulator/scenarios/{scenario_id}/routing": {
+      "post": {
+        "operationId": "runSimulationRouting",
+        "summary": "Ejecuta motor de ruteo sobre revision y evaluation_time congelados del simulacro",
+        "parameters": [
+          {
+            "name": "scenario_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SimulationRoutingRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resultado discriminado de ruteo en contexto SIMULATION",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SimulationRoutingResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/simulator/scenarios/{scenario_id}/evaluate": {
+      "post": {
+        "operationId": "evaluateSimulationImpact",
+        "summary": "Evalua impacto de viaje en simulacro y persiste simulation_impact_logs",
+        "parameters": [
+          {
+            "name": "scenario_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SimulationEvaluateRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Evaluacion de impacto registrada",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SimulationEvaluateResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/simulator/scenarios/{scenario_id}/impact": {
+      "get": {
+        "operationId": "getSimulationImpact",
+        "summary": "Obtiene metricas base, mitigadas (null si NO_SAFE_ROUTE) y deltas",
+        "parameters": [
+          {
+            "name": "scenario_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resumen reproducible de evaluaciones del escenario",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SimulationImpactResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      },
+      "WebhookHmac": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Webhook-Signature"
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "No autenticado o firma invalida",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ApiError" }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Rol insuficiente",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ApiError" }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "Conflicto de idempotencia o version",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ApiError" }
+          }
+        }
+      },
+      "ValidationError": {
+        "description": "Error de validacion de esquema",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ApiError" }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Limite de tasa excedido",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ApiError" }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "ApiError": {
+        "type": "object",
+        "required": ["error_code", "message", "details", "request_id"],
+        "properties": {
+          "error_code": { "type": "string" },
+          "message": { "type": "string" },
+          "details": { "type": "object", "additionalProperties": true },
+          "request_id": { "type": "string", "format": "uuid" }
+        }
+      },
+      "RiskLevel": {
+        "type": "string",
+        "enum": ["GREEN", "AMBER", "RED", "UNKNOWN"]
+      },
+      "PassabilityState": {
+        "type": "string",
+        "enum": ["OPEN", "CAUTION_SUSPECTED", "PARTIAL_ONE_LANE", "BLOCKED"]
+      },
+      "ProposedPassability": {
+        "type": "string",
+        "enum": ["BLOCKED", "PARTIAL_ONE_LANE", "OPEN"]
+      },
+      "VerificationState": {
+        "type": "string",
+        "enum": ["SUSPECTED", "CONFIRMED", "DISMISSED", "RESOLVED"]
+      },
+      "Direction": {
+        "type": "string",
+        "enum": ["ORIGIN_TO_DEST", "DEST_TO_ORIGIN"]
+      },
+      "VehicleCategoryCode": {
+        "type": "string",
+        "enum": ["AMBULANCE_4X4", "PICKUP_4X4", "LIGHT_TRUCK", "HEAVY_TRAILER", "MOTORCYCLE"]
+      },
+      "CargoType": {
+        "type": "string",
+        "enum": ["MEDICAL_PATIENT", "MEDICAL_SUPPLIES", "PERISHABLE_AGRI"]
+      },
+      "NoSafeRouteReasonCode": {
+        "type": "string",
+        "enum": [
+          "UNVERIFIED_PHYSICAL_ATTRIBUTES",
+          "STALE_IVV",
+          "VEHICLE_RESTRICTION",
+          "TRANSFER_REVALIDATION_REQUIRED",
+          "TRANSFER_INSPECTION_EXPIRED",
+          "HAZARD_INTERSECTS_TRANSFER_PATH",
+          "TRANSFER_IVV_EXCEEDED",
+          "TRANSFER_CARGO_CAPACITY_EXCEEDED",
+          "TRANSFER_CARGO_NOT_ALLOWED",
+          "NO_VERIFIED_TRANSFER_CORRIDOR",
+          "NETWORK_DISCONNECTED"
+        ]
+      },
+      "OtpRequestInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["phone_e164"],
+        "properties": {
+          "phone_e164": { "type": "string", "minLength": 8, "maxLength": 20 }
+        }
+      },
+      "OtpRequestResponse": {
+        "type": "object",
+        "required": ["challenge_id", "expires_in_sec", "message"],
+        "properties": {
+          "challenge_id": { "type": "string", "format": "uuid" },
+          "expires_in_sec": { "type": "integer" },
+          "message": { "type": "string" }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["phone_e164", "device_id"],
+        "properties": {
+          "phone_e164": { "type": "string" },
+          "device_id": { "type": "string" },
+          "challenge_id": { "type": "string", "format": "uuid" },
+          "otp_code": { "type": "string", "pattern": "^[0-9]{6}$" },
+          "password": { "type": "string" }
+        }
+      },
+      "RefreshRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["refresh_token", "device_id"],
+        "properties": {
+          "refresh_token": { "type": "string" },
+          "device_id": { "type": "string" }
+        }
+      },
+      "AuthTokenResponse": {
+        "type": "object",
+        "required": ["access_token", "refresh_token", "token_type", "expires_in_sec"],
+        "properties": {
+          "access_token": { "type": "string" },
+          "refresh_token": { "type": "string" },
+          "token_type": { "type": "string", "const": "Bearer" },
+          "expires_in_sec": { "type": "integer" }
+        }
+      },
+      "SyncEntityType": {
+        "type": "string",
+        "enum": [
+          "ROAD_NODE",
+          "ROAD_SEGMENT",
+          "TRANSFER_CORRIDOR",
+          "VEHICLE_CATEGORY",
+          "IVV_ASSESSMENT",
+          "INCIDENT",
+          "LOGISTIC_BRIDGE",
+          "HUMANITARIAN_WINDOW"
+        ]
+      },
+      "SyncChangeItem": {
+        "type": "object",
+        "required": ["change_seq", "entity_type", "entity_id", "operation", "changed_at", "payload_json"],
+        "properties": {
+          "change_seq": { "type": "integer", "format": "int64", "minimum": 1 },
+          "entity_type": { "$ref": "#/components/schemas/SyncEntityType" },
+          "entity_id": { "type": "string", "format": "uuid" },
+          "operation": { "type": "string", "enum": ["UPSERT", "DELETE"] },
+          "changed_at": { "type": "string", "format": "date-time" },
+          "payload_json": { "type": ["object", "null"], "additionalProperties": true }
+        }
+      },
+      "SyncSnapshotResponse": {
+        "type": "object",
+        "required": ["changes", "next_since_version", "has_more", "server_time"],
+        "properties": {
+          "changes": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/SyncChangeItem" }
+          },
+          "next_since_version": { "type": "integer", "format": "int64", "minimum": 0 },
+          "has_more": { "type": "boolean" },
+          "server_time": { "type": "string", "format": "date-time" }
+        }
+      },
+      "OfflineReportItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["client_uuid", "segment_id", "proposed_passability", "latitude", "longitude", "captured_at_client"],
+        "properties": {
+          "client_uuid": { "type": "string", "format": "uuid" },
+          "segment_id": { "type": "string", "format": "uuid" },
+          "proposed_passability": { "$ref": "#/components/schemas/ProposedPassability" },
+          "latitude": { "type": "number", "minimum": -90, "maximum": 90 },
+          "longitude": { "type": "number", "minimum": -180, "maximum": 180 },
+          "captured_at_client": { "type": "string", "format": "date-time" },
+          "photo_uri": { "type": ["string", "null"] }
+        }
+      },
+      "TelemetryPingItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["client_ping_uuid", "latitude", "longitude", "speed_kmh", "recorded_at"],
+        "properties": {
+          "client_ping_uuid": { "type": "string", "format": "uuid" },
+          "latitude": { "type": "number", "minimum": -90, "maximum": 90 },
+          "longitude": { "type": "number", "minimum": -180, "maximum": 180 },
+          "speed_kmh": { "type": "number", "minimum": 0 },
+          "recorded_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "TelemetryIngestRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["client_ephemeral_id", "ephemeral_id_date_utc", "pings"],
+        "properties": {
+          "client_ephemeral_id": { "type": "string", "format": "uuid" },
+          "ephemeral_id_date_utc": { "type": "string", "format": "date" },
+          "pings": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/components/schemas/TelemetryPingItem" }
+          }
+        }
+      },
+      "TelemetryIngestResponse": {
+        "type": "object",
+        "required": ["accepted", "expired", "duplicates", "server_time"],
+        "properties": {
+          "accepted": { "type": "integer", "minimum": 0 },
+          "expired": { "type": "integer", "minimum": 0 },
+          "duplicates": { "type": "integer", "minimum": 0 },
+          "server_time": { "type": "string", "format": "date-time" }
+        }
+      },
+      "SyncBatchRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["reports", "telemetry_batches"],
+        "properties": {
+          "reports": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/OfflineReportItem" }
+          },
+          "telemetry_batches": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/TelemetryIngestRequest" }
+          }
+        }
+      },
+      "SyncBatchItemStatus": {
+        "type": "string",
+        "enum": [
+          "CREATED",
+          "DUPLICATE_IGNORED",
+          "REJECTED_DISTANCE",
+          "STALE_ARCHIVED",
+          "EXPIRED_NO_DETECTION",
+          "VALIDATION_ERROR"
+        ]
+      },
+      "SyncBatchResultEntry": {
+        "type": "object",
+        "required": ["client_id", "status", "server_time"],
+        "properties": {
+          "client_id": { "type": "string", "format": "uuid" },
+          "status": { "$ref": "#/components/schemas/SyncBatchItemStatus" },
+          "server_time": { "type": "string", "format": "date-time" }
+        }
+      },
+      "SyncBatchResponse": {
+        "type": "object",
+        "required": ["report_results", "telemetry_results", "server_time"],
+        "properties": {
+          "report_results": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/SyncBatchResultEntry" }
+          },
+          "telemetry_results": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/SyncBatchResultEntry" }
+          },
+          "server_time": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CorridorSegmentProperties": {
+        "type": "object",
+        "required": [
+          "segment_id",
+          "origin_node_id",
+          "destination_node_id",
+          "corridor_name",
+          "direction_type",
+          "length_km",
+          "surface_type",
+          "passability_state",
+          "ivv_score",
+          "risk_level",
+          "observed_at",
+          "calculated_at",
+          "model_version_tag",
+          "is_stale",
+          "is_attributes_verified"
+        ],
+        "properties": {
+          "segment_id": { "type": "string", "format": "uuid" },
+          "origin_node_id": { "type": "string", "format": "uuid" },
+          "destination_node_id": { "type": "string", "format": "uuid" },
+          "corridor_name": { "type": "string" },
+          "direction_type": { "type": "string", "enum": ["ONE_WAY", "BIDIRECTIONAL"] },
+          "length_km": { "type": "number" },
+          "surface_type": { "type": "string", "enum": ["PAVED", "GRAVEL", "DIRT_TRACK"] },
+          "passability_state": { "$ref": "#/components/schemas/PassabilityState" },
+          "ivv_score": { "type": ["number", "null"] },
+          "risk_level": { "$ref": "#/components/schemas/RiskLevel" },
+          "observed_at": { "type": ["string", "null"], "format": "date-time" },
+          "calculated_at": { "type": ["string", "null"], "format": "date-time" },
+          "model_version_tag": { "type": ["string", "null"] },
+          "is_stale": { "type": "boolean" },
+          "is_attributes_verified": { "type": "boolean" }
+        }
+      },
+      "CorridorSegmentFeature": {
+        "type": "object",
+        "required": ["type", "geometry", "properties"],
+        "properties": {
+          "type": { "type": "string", "const": "Feature" },
+          "geometry": {
+            "type": "object",
+            "required": ["type", "coordinates"],
+            "properties": {
+              "type": { "type": "string", "const": "LineString" },
+              "coordinates": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "items": { "type": "number" }
+                }
+              }
+            }
+          },
+          "properties": { "$ref": "#/components/schemas/CorridorSegmentProperties" }
+        }
+      },
+      "CorridorMapFeatureCollection": {
+        "type": "object",
+        "required": ["type", "features", "generated_at"],
+        "properties": {
+          "type": { "type": "string", "const": "FeatureCollection" },
+          "generated_at": { "type": "string", "format": "date-time" },
+          "features": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/CorridorSegmentFeature" }
+          }
+        }
+      },
+      "IvvRecalculateObservationInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["segment_id", "source_name", "precip_24h_mm", "precip_72h_mm", "observed_at"],
+        "properties": {
+          "segment_id": { "type": "string", "format": "uuid" },
+          "source_name": { "type": "string", "enum": ["SENAMHI", "NASA_GPM", "OPEN_METEO", "LOCAL_STATION"] },
+          "precip_24h_mm": { "type": "number", "minimum": 0 },
+          "precip_72h_mm": { "type": "number", "minimum": 0 },
+          "observed_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "IvvRecalculateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["observations"],
+        "properties": {
+          "observations": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/components/schemas/IvvRecalculateObservationInput" }
+          }
+        }
+      },
+      "IvvRecalculateResponse": {
+        "type": "object",
+        "required": ["model_version_tag", "assessments_created", "revalidations_triggered"],
+        "properties": {
+          "model_version_tag": { "type": "string" },
+          "assessments_created": { "type": "integer", "minimum": 0 },
+          "revalidations_triggered": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "FieldReportCreateRequest": {
+        "allOf": [
+          { "$ref": "#/components/schemas/OfflineReportItem" },
+          {
+            "type": "object",
+            "properties": {
+              "channel": { "type": "string", "enum": ["MOBILE_APP", "WHATSAPP_BOT", "SMS"] }
+            }
+          }
+        ]
+      },
+      "FieldReportResponse": {
+        "type": "object",
+        "required": ["report_id", "validation_status", "clock_skew_flagged", "synced_at_server"],
+        "properties": {
+          "report_id": { "type": "string", "format": "uuid" },
+          "validation_status": {
+            "type": "string",
+            "enum": ["PENDING", "VERIFIED", "REJECTED_DISTANCE", "REJECTED_CONTRADICTED", "STALE_ARCHIVED"]
+          },
+          "clock_skew_flagged": { "type": "boolean" },
+          "synced_at_server": { "type": "string", "format": "date-time" }
+        }
+      },
+      "MessagingWebhookRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["channel", "sender_phone_e164", "segment_id", "proposed_passability", "latitude", "longitude", "timestamp_utc"],
+        "properties": {
+          "channel": { "type": "string", "enum": ["WHATSAPP_BOT", "SMS"] },
+          "sender_phone_e164": { "type": "string" },
+          "segment_id": { "type": "string", "format": "uuid" },
+          "proposed_passability": { "$ref": "#/components/schemas/ProposedPassability" },
+          "latitude": { "type": "number" },
+          "longitude": { "type": "number" },
+          "timestamp_utc": { "type": "string", "format": "date-time" }
+        }
+      },
+      "MessagingWebhookResponse": {
+        "type": "object",
+        "required": ["accepted", "reply_preview"],
+        "properties": {
+          "accepted": { "type": "boolean" },
+          "reply_preview": { "type": "string" }
+        }
+      },
+      "IncidentVerificationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["verification_state", "impact_passability"],
+        "properties": {
+          "verification_state": { "$ref": "#/components/schemas/VerificationState" },
+          "impact_passability": { "type": "string", "enum": ["CAUTION_SUSPECTED", "PARTIAL_ONE_LANE", "BLOCKED"] },
+          "notes": { "type": "string" }
+        }
+      },
+      "IncidentResponse": {
+        "type": "object",
+        "required": ["incident_id", "segment_id", "verification_state", "impact_passability", "detected_at"],
+        "properties": {
+          "incident_id": { "type": "string", "format": "uuid" },
+          "segment_id": { "type": "string", "format": "uuid" },
+          "verification_state": { "$ref": "#/components/schemas/VerificationState" },
+          "impact_passability": { "type": "string", "enum": ["CAUTION_SUSPECTED", "PARTIAL_ONE_LANE", "BLOCKED"] },
+          "detected_at": { "type": "string", "format": "date-time" },
+          "confirmed_at": { "type": ["string", "null"], "format": "date-time" },
+          "resolved_at": { "type": ["string", "null"], "format": "date-time" }
+        }
+      },
+      "RoutingCalculateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["origin_node_id", "destination_node_id", "vehicle_category_code", "cargo_type"],
+        "properties": {
+          "origin_node_id": { "type": "string", "format": "uuid" },
+          "destination_node_id": { "type": "string", "format": "uuid" },
+          "vehicle_category_code": { "$ref": "#/components/schemas/VehicleCategoryCode" },
+          "cargo_type": { "$ref": "#/components/schemas/CargoType" },
+          "cargo_payload_kg": { "type": "number", "exclusiveMinimum": 0 },
+          "patient_count": { "type": "integer", "minimum": 1, "maximum": 1 }
+        }
+      },
+      "RouteHop": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["segment_id", "direction"],
+        "properties": {
+          "segment_id": { "type": "string", "format": "uuid" },
+          "direction": { "$ref": "#/components/schemas/Direction" }
+        }
+      },
+      "AlternateRouteResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "resolution_type",
+          "routing_config_tag",
+          "total_distance_km",
+          "estimated_time_min",
+          "max_ivv_on_route",
+          "hops",
+          "eta_quality",
+          "operational_authorization",
+          "warnings"
+        ],
+        "properties": {
+          "resolution_type": { "type": "string", "const": "ALTERNATE_ROUTE" },
+          "routing_config_tag": { "type": "string" },
+          "total_distance_km": { "type": "number" },
+          "estimated_time_min": { "type": "number" },
+          "max_ivv_on_route": { "type": "number" },
+          "hops": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/RouteHop" }
+          },
+          "eta_quality": { "type": "string", "enum": ["NOMINAL_ESTIMATE"] },
+          "operational_authorization": { "type": "string", "const": "REQUIRED" },
+          "warnings": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      },
+      "BridgeProposal": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "corridor_id",
+          "side_a_node_id",
+          "side_b_node_id",
+          "transfer_mode",
+          "length_m",
+          "last_inspected_at",
+          "inspection_expires_at",
+          "operational_authorization",
+          "estimated_transfer_time_min"
+        ],
+        "properties": {
+          "corridor_id": { "type": "string", "format": "uuid" },
+          "side_a_node_id": { "type": "string", "format": "uuid" },
+          "side_b_node_id": { "type": "string", "format": "uuid" },
+          "transfer_mode": { "type": "string", "enum": ["PEDESTRIAN_SAFE_PATH", "SHUTTLE_RELAY"] },
+          "length_m": { "type": "integer" },
+          "last_inspected_at": { "type": "string", "format": "date-time" },
+          "inspection_expires_at": { "type": "string", "format": "date-time" },
+          "operational_authorization": { "type": "string", "const": "REQUIRED" },
+          "estimated_transfer_time_min": { "type": "number" }
+        }
+      },
+      "LogisticBridgeRequiredResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["resolution_type", "blocking_incident_id", "bridge_proposal"],
+        "properties": {
+          "resolution_type": { "type": "string", "const": "LOGISTIC_BRIDGE_REQUIRED" },
+          "blocking_incident_id": { "type": "string", "format": "uuid" },
+          "bridge_proposal": { "$ref": "#/components/schemas/BridgeProposal" },
+          "warnings": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      },
+      "NoSafeRouteResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["resolution_type", "blocking_incident_id", "reason_code"],
+        "properties": {
+          "resolution_type": { "type": "string", "const": "NO_SAFE_ROUTE" },
+          "blocking_incident_id": { "type": ["string", "null"], "format": "uuid" },
+          "reason_code": { "$ref": "#/components/schemas/NoSafeRouteReasonCode" },
+          "warnings": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      },
+      "RoutingCalculateResponse": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/AlternateRouteResponse" },
+          { "$ref": "#/components/schemas/LogisticBridgeRequiredResponse" },
+          { "$ref": "#/components/schemas/NoSafeRouteResponse" }
+        ],
+        "discriminator": {
+          "propertyName": "resolution_type",
+          "mapping": {
+            "ALTERNATE_ROUTE": "#/components/schemas/AlternateRouteResponse",
+            "LOGISTIC_BRIDGE_REQUIRED": "#/components/schemas/LogisticBridgeRequiredResponse",
+            "NO_SAFE_ROUTE": "#/components/schemas/NoSafeRouteResponse"
+          }
+        }
+      },
+      "CreateBridgeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["incident_id", "corridor_id", "cargo_type"],
+        "properties": {
+          "incident_id": { "type": "string", "format": "uuid" },
+          "corridor_id": { "type": "string", "format": "uuid" },
+          "cargo_type": { "$ref": "#/components/schemas/CargoType" }
+        }
+      },
+      "UpdateBridgeStatusRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status"],
+        "properties": {
+          "status": { "type": "string", "enum": ["ACTIVE", "SUSPENDED_UNSAFE", "COMPLETED"] }
+        }
+      },
+      "LogisticBridgeResponse": {
+        "type": "object",
+        "required": ["bridge_id", "incident_id", "corridor_id", "cargo_type", "status", "created_at"],
+        "properties": {
+          "bridge_id": { "type": "string", "format": "uuid" },
+          "incident_id": { "type": "string", "format": "uuid" },
+          "corridor_id": { "type": "string", "format": "uuid" },
+          "cargo_type": { "$ref": "#/components/schemas/CargoType" },
+          "status": { "type": "string", "enum": ["PROPOSED", "ACTIVE", "SUSPENDED_UNSAFE", "COMPLETED"] },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CreateHumanitarianWindowRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["vehicle_category_id", "direction", "starts_at", "ends_at"],
+        "properties": {
+          "vehicle_category_id": { "type": "string", "format": "uuid" },
+          "direction": { "$ref": "#/components/schemas/Direction" },
+          "starts_at": { "type": "string", "format": "date-time" },
+          "ends_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "HumanitarianWindowResponse": {
+        "type": "object",
+        "required": ["window_id", "incident_id", "direction", "starts_at", "ends_at", "status"],
+        "properties": {
+          "window_id": { "type": "string", "format": "uuid" },
+          "incident_id": { "type": "string", "format": "uuid" },
+          "direction": { "$ref": "#/components/schemas/Direction" },
+          "starts_at": { "type": "string", "format": "date-time" },
+          "ends_at": { "type": "string", "format": "date-time" },
+          "status": { "type": "string", "enum": ["SCHEDULED", "ACTIVE", "CLOSED"] }
+        }
+      },
+      "CreateScenarioRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "fixture_tag"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "fixture_tag": { "type": "string", "minLength": 1, "maxLength": 48 }
+        }
+      },
+      "ScenarioResponse": {
+        "type": "object",
+        "required": ["scenario_id", "name", "fixture_tag", "revision", "status", "created_at"],
+        "properties": {
+          "scenario_id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "fixture_tag": { "type": "string" },
+          "revision": { "type": "integer", "format": "int64" },
+          "status": { "type": "string", "enum": ["DRAFT", "RUNNING", "COMPLETED", "ARCHIVED"] },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "WeatherOverrideEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["segment_id", "event_type", "precip_24h_mm", "precip_72h_mm"],
+        "properties": {
+          "segment_id": { "type": "string", "format": "uuid" },
+          "event_type": { "type": "string", "const": "WEATHER_OVERRIDE" },
+          "precip_24h_mm": { "type": "number", "minimum": 0 },
+          "precip_72h_mm": { "type": "number", "minimum": 0 }
+        }
+      },
+      "BlockageOverrideEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["segment_id", "event_type", "simulated_passability", "hazard_lat", "hazard_lon", "hazard_radius_m"],
+        "properties": {
+          "segment_id": { "type": "string", "format": "uuid" },
+          "event_type": { "type": "string", "const": "BLOCKAGE_OVERRIDE" },
+          "simulated_passability": { "type": "string", "enum": ["BLOCKED", "PARTIAL_ONE_LANE"] },
+          "hazard_lat": { "type": "number", "minimum": -90, "maximum": 90 },
+          "hazard_lon": { "type": "number", "minimum": -180, "maximum": 180 },
+          "hazard_radius_m": { "type": "integer", "minimum": 1 }
+        }
+      },
+      "SimEventRequest": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/WeatherOverrideEvent" },
+          { "$ref": "#/components/schemas/BlockageOverrideEvent" }
+        ],
+        "discriminator": {
+          "propertyName": "event_type",
+          "mapping": {
+            "WEATHER_OVERRIDE": "#/components/schemas/WeatherOverrideEvent",
+            "BLOCKAGE_OVERRIDE": "#/components/schemas/BlockageOverrideEvent"
+          }
+        }
+      },
+      "SimEventResponse": {
+        "type": "object",
+        "required": ["sim_event_id", "scenario_id", "execution_context", "simulated_notifications"],
+        "properties": {
+          "sim_event_id": { "type": "string", "format": "uuid" },
+          "scenario_id": { "type": "string", "format": "uuid" },
+          "execution_context": { "type": "string", "const": "SIMULATION" },
+          "simulated_notifications": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["channel", "preview"],
+              "properties": {
+                "channel": { "type": "string" },
+                "preview": { "type": "string" }
+              }
+            }
+          }
+        }
+      },
+      "SimulationRoutingRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "origin_node_id",
+          "destination_node_id",
+          "vehicle_category_code",
+          "cargo_type",
+          "scenario_revision",
+          "evaluation_time"
+        ],
+        "properties": {
+          "origin_node_id": { "type": "string", "format": "uuid" },
+          "destination_node_id": { "type": "string", "format": "uuid" },
+          "vehicle_category_code": { "$ref": "#/components/schemas/VehicleCategoryCode" },
+          "cargo_type": { "$ref": "#/components/schemas/CargoType" },
+          "cargo_payload_kg": { "type": "number", "exclusiveMinimum": 0 },
+          "patient_count": { "type": "integer", "minimum": 1, "maximum": 1 },
+          "scenario_revision": { "type": "integer", "format": "int64", "minimum": 0 },
+          "evaluation_time": { "type": "string", "format": "date-time" }
+        }
+      },
+      "SimulationRoutingResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/RoutingCalculateResponse" },
+          {
+            "type": "object",
+            "required": ["execution_context", "scenario_id"],
+            "properties": {
+              "execution_context": { "type": "string", "const": "SIMULATION" },
+              "scenario_id": { "type": "string", "format": "uuid" }
+            }
+          }
+        ]
+      },
+      "SimulationEvaluateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "origin_node_id",
+          "destination_node_id",
+          "vehicle_category_code",
+          "cargo_type",
+          "baseline_wait_min",
+          "scenario_revision",
+          "evaluation_time"
+        ],
+        "properties": {
+          "origin_node_id": { "type": "string", "format": "uuid" },
+          "destination_node_id": { "type": "string", "format": "uuid" },
+          "vehicle_category_code": { "$ref": "#/components/schemas/VehicleCategoryCode" },
+          "cargo_type": { "$ref": "#/components/schemas/CargoType" },
+          "cargo_payload_kg": { "type": "number", "exclusiveMinimum": 0 },
+          "patient_count": { "type": "integer", "minimum": 1, "maximum": 1 },
+          "baseline_wait_min": { "type": "number", "minimum": 0 },
+          "scenario_revision": { "type": "integer", "format": "int64", "minimum": 0 },
+          "evaluation_time": { "type": "string", "format": "date-time" }
+        }
+      },
+      "SimulationEvaluateResponse": {
+        "type": "object",
+        "required": [
+          "sim_log_id",
+          "resolution_type",
+          "mitigation_status",
+          "scenario_revision",
+          "evaluation_time",
+          "param_version_tag",
+          "model_version_tag",
+          "routing_config_tag"
+        ],
+        "properties": {
+          "sim_log_id": { "type": "string", "format": "uuid" },
+          "resolution_type": {
+            "type": "string",
+            "enum": ["ALTERNATE_ROUTE", "LOGISTIC_BRIDGE_REQUIRED", "NO_SAFE_ROUTE"]
+          },
+          "mitigation_status": {
+            "type": "string",
+            "enum": ["MITIGATED", "UNMITIGATED_NO_SAFE_ROUTE"]
+          },
+          "scenario_revision": { "type": "integer", "format": "int64" },
+          "evaluation_time": { "type": "string", "format": "date-time" },
+          "param_version_tag": { "type": "string" },
+          "model_version_tag": { "type": "string" },
+          "routing_config_tag": { "type": "string" }
+        }
+      },
+      "ImpactBaselineMetrics": {
+        "type": "object",
+        "required": ["travel_min", "co2_kg", "cargo_loss_usd"],
+        "properties": {
+          "travel_min": { "type": "number" },
+          "co2_kg": { "type": "number" },
+          "cargo_loss_usd": { "type": "number" }
+        }
+      },
+      "ImpactMitigatedMetrics": {
+        "type": "object",
+        "required": ["travel_min", "co2_kg", "cargo_loss_usd"],
+        "properties": {
+          "travel_min": { "type": ["number", "null"] },
+          "co2_kg": { "type": ["number", "null"] },
+          "cargo_loss_usd": { "type": ["number", "null"] }
+        }
+      },
+      "ImpactDeltaMetrics": {
+        "type": "object",
+        "required": ["time_delta_min", "time_saved_pct", "net_co2_delta_kg", "net_agri_savings_usd"],
+        "properties": {
+          "time_delta_min": { "type": ["number", "null"] },
+          "time_saved_pct": { "type": ["number", "null"] },
+          "net_co2_delta_kg": { "type": ["number", "null"] },
+          "net_agri_savings_usd": { "type": ["number", "null"] }
+        }
+      },
+      "SimulationImpactEvaluationItem": {
+        "type": "object",
+        "required": ["sim_log_id", "resolution_type", "mitigation_status", "baseline", "mitigated", "deltas"],
+        "properties": {
+          "sim_log_id": { "type": "string", "format": "uuid" },
+          "resolution_type": {
+            "type": "string",
+            "enum": ["ALTERNATE_ROUTE", "LOGISTIC_BRIDGE_REQUIRED", "NO_SAFE_ROUTE"]
+          },
+          "mitigation_status": {
+            "type": "string",
+            "enum": ["MITIGATED", "UNMITIGATED_NO_SAFE_ROUTE"]
+          },
+          "baseline": { "$ref": "#/components/schemas/ImpactBaselineMetrics" },
+          "mitigated": { "$ref": "#/components/schemas/ImpactMitigatedMetrics" },
+          "deltas": { "$ref": "#/components/schemas/ImpactDeltaMetrics" }
+        }
+      },
+      "SimulationImpactResponse": {
+        "type": "object",
+        "required": ["scenario_id", "evaluations"],
+        "properties": {
+          "scenario_id": { "type": "string", "format": "uuid" },
+          "evaluations": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/SimulationImpactEvaluationItem" }
+          }
+        }
+      }
+    }
+  }
+}
