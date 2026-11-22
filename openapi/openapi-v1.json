@@ -951,10 +951,17 @@
     "/incidents": {
       "get": {
         "operationId": "listIncidents",
-        "summary": "Lista incidentes viales registrados",
+        "summary": "Lista incidentes viales registrados con fotos de evidencia",
         "security": [],
         "responses": {
-          "200": { "description": "Lista de incidentes" }
+          "200": {
+            "description": "Lista de incidentes",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/IncidentsListResponse" }
+              }
+            }
+          }
         }
       }
     },
@@ -1028,6 +1035,177 @@
           "403": { "$ref": "#/components/responses/Forbidden" }
         }
       }
+    },
+    "/routing/multi-stop": {
+      "post": {
+        "operationId": "calculateMultiStopRouting",
+        "summary": "Calcula ruta segura con multiples paradas intermedias (2 a 6 nodos)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/MultiStopRoutingRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resolucion multiparada determinista",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/MultiStopRoutingResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "422": { "$ref": "#/components/responses/ValidationError" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/b2b/api-keys": {
+      "get": {
+        "operationId": "listB2bApiKeys",
+        "summary": "Lista API keys B2B activas o revocadas",
+        "responses": {
+          "200": {
+            "description": "Listado de API keys sin secreto completo",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiKeysListResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "post": {
+        "operationId": "createB2bApiKey",
+        "summary": "Emite una nueva API key B2B para integracion ERP/TMS (solo COER_ADMIN)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateApiKeyRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "API key creada con secreto mostrado una sola vez",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CreateApiKeyResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/b2b/api-keys/{api_key_id}": {
+      "delete": {
+        "operationId": "revokeB2bApiKey",
+        "summary": "Revoca inmediatamente una API key B2B",
+        "parameters": [
+          {
+            "name": "api_key_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "204": { "description": "API key revocada" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/b2b/webhooks": {
+      "get": {
+        "operationId": "listB2bWebhooks",
+        "summary": "Lista endpoints webhook B2B salientes firmados",
+        "responses": {
+          "200": {
+            "description": "Webhooks registrados con secreto enmascarado",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WebhooksListResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "post": {
+        "operationId": "createB2bWebhook",
+        "summary": "Registra webhook HTTPS saliente con validacion anti-SSRF y secreto HMAC",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateWebhookRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Webhook creado",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CreateWebhookResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/b2b/webhooks/{webhook_id}": {
+      "delete": {
+        "operationId": "deleteB2bWebhook",
+        "summary": "Elimina un webhook saliente B2B",
+        "parameters": [
+          {
+            "name": "webhook_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "204": { "description": "Webhook eliminado" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/b2b/corridors/status": {
+      "post": {
+        "operationId": "batchCorridorsStatus",
+        "summary": "Consulta masiva del estado de transitabilidad e IVV para flotas B2B",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BatchCorridorStatusRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resumen y estado por tramo",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BatchCorridorStatusResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
     }
   },
   "components": {
@@ -1036,6 +1214,11 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "JWT"
+      },
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key"
       },
       "WebhookHmac": {
         "type": "apiKey",
@@ -2104,6 +2287,184 @@
           "inspection_valid_days": { "type": "integer" },
           "requires_revalidation": { "type": "boolean" },
           "cargo_types": { "type": "array", "items": { "$ref": "#/components/schemas/CargoType" } }
+        }
+      },
+      "IncidentListItem": {
+        "type": "object",
+        "required": [
+          "incident_id", "segment_id", "corridor_name", "trigger_source",
+          "verification_state", "impact_passability", "hazard_lat", "hazard_lon",
+          "hazard_radius_m", "detected_at", "evidence_photos"
+        ],
+        "properties": {
+          "incident_id": { "type": "string", "format": "uuid" },
+          "segment_id": { "type": "string", "format": "uuid" },
+          "corridor_name": { "type": "string" },
+          "trigger_source": { "type": "string" },
+          "verification_state": { "$ref": "#/components/schemas/VerificationState" },
+          "impact_passability": { "$ref": "#/components/schemas/PassabilityState" },
+          "hazard_lat": { "type": "number" },
+          "hazard_lon": { "type": "number" },
+          "hazard_radius_m": { "type": "integer" },
+          "detected_at": { "type": "string", "format": "date-time" },
+          "confirmed_at": { "type": ["string", "null"], "format": "date-time" },
+          "resolved_at": { "type": ["string", "null"], "format": "date-time" },
+          "evidence_photos": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "IncidentsListResponse": {
+        "type": "object",
+        "required": ["incidents"],
+        "properties": {
+          "incidents": { "type": "array", "items": { "$ref": "#/components/schemas/IncidentListItem" } }
+        }
+      },
+      "MultiStopRoutingRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["stop_node_ids", "vehicle_category_code", "cargo_type"],
+        "properties": {
+          "stop_node_ids": { "type": "array", "minItems": 2, "maxItems": 6, "items": { "type": "string", "format": "uuid" } },
+          "vehicle_category_code": { "$ref": "#/components/schemas/VehicleCategoryCode" },
+          "cargo_type": { "$ref": "#/components/schemas/CargoType" },
+          "cargo_payload_kg": { "type": ["number", "null"] },
+          "patient_count": { "type": ["integer", "null"] }
+        }
+      },
+      "MultiStopLegDto": {
+        "type": "object",
+        "required": ["leg_index", "origin_node_id", "destination_node_id", "resolution"],
+        "properties": {
+          "leg_index": { "type": "integer" },
+          "origin_node_id": { "type": "string", "format": "uuid" },
+          "destination_node_id": { "type": "string", "format": "uuid" },
+          "resolution": { "$ref": "#/components/schemas/RoutingCalculateResponse" }
+        }
+      },
+      "MultiStopRoutingResponse": {
+        "type": "object",
+        "required": ["overall_status", "total_distance_km", "estimated_time_min", "max_ivv_on_route", "legs"],
+        "properties": {
+          "overall_status": { "type": "string" },
+          "blocking_reason_code": { "type": ["string", "null"] },
+          "total_distance_km": { "type": "number" },
+          "estimated_time_min": { "type": "number" },
+          "max_ivv_on_route": { "type": "number" },
+          "economic_impact": { "type": ["object", "null"], "additionalProperties": true },
+          "legs": { "type": "array", "items": { "$ref": "#/components/schemas/MultiStopLegDto" } }
+        }
+      },
+      "ApiKeySummaryDto": {
+        "type": "object",
+        "required": ["api_key_id", "organization_name", "key_prefix", "role_code", "rate_limit_rpm", "is_active", "created_at"],
+        "properties": {
+          "api_key_id": { "type": "string", "format": "uuid" },
+          "organization_name": { "type": "string" },
+          "key_prefix": { "type": "string" },
+          "role_code": { "type": "string" },
+          "rate_limit_rpm": { "type": "integer" },
+          "is_active": { "type": "boolean" },
+          "last_used_at": { "type": ["string", "null"], "format": "date-time" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "revoked_at": { "type": ["string", "null"], "format": "date-time" }
+        }
+      },
+      "ApiKeysListResponse": {
+        "type": "object",
+        "required": ["api_keys"],
+        "properties": {
+          "api_keys": { "type": "array", "items": { "$ref": "#/components/schemas/ApiKeySummaryDto" } }
+        }
+      },
+      "CreateApiKeyRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["organization_name"],
+        "properties": {
+          "organization_name": { "type": "string" },
+          "role_code": { "type": ["string", "null"] },
+          "rate_limit_rpm": { "type": ["integer", "null"] }
+        }
+      },
+      "CreateApiKeyResponse": {
+        "type": "object",
+        "required": ["api_key_id", "organization_name", "key_prefix", "raw_api_key", "role_code", "rate_limit_rpm", "created_at"],
+        "properties": {
+          "api_key_id": { "type": "string", "format": "uuid" },
+          "organization_name": { "type": "string" },
+          "key_prefix": { "type": "string" },
+          "raw_api_key": { "type": "string" },
+          "role_code": { "type": "string" },
+          "rate_limit_rpm": { "type": "integer" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "WebhookEndpointDto": {
+        "type": "object",
+        "required": ["webhook_id", "organization_name", "target_url", "masked_secret", "min_risk_level", "is_active", "created_at"],
+        "properties": {
+          "webhook_id": { "type": "string", "format": "uuid" },
+          "organization_name": { "type": "string" },
+          "target_url": { "type": "string" },
+          "masked_secret": { "type": "string" },
+          "region_iso": { "type": ["string", "null"] },
+          "min_risk_level": { "type": "string" },
+          "is_active": { "type": "boolean" },
+          "last_delivery_status": { "type": ["integer", "null"] },
+          "last_delivered_at": { "type": ["string", "null"], "format": "date-time" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "WebhooksListResponse": {
+        "type": "object",
+        "required": ["webhooks"],
+        "properties": {
+          "webhooks": { "type": "array", "items": { "$ref": "#/components/schemas/WebhookEndpointDto" } }
+        }
+      },
+      "CreateWebhookRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["organization_name", "target_url"],
+        "properties": {
+          "organization_name": { "type": "string" },
+          "target_url": { "type": "string" },
+          "region_iso": { "type": ["string", "null"] },
+          "min_risk_level": { "type": ["string", "null"] }
+        }
+      },
+      "CreateWebhookResponse": {
+        "type": "object",
+        "required": ["webhook_id", "organization_name", "target_url", "signing_secret", "min_risk_level", "created_at"],
+        "properties": {
+          "webhook_id": { "type": "string", "format": "uuid" },
+          "organization_name": { "type": "string" },
+          "target_url": { "type": "string" },
+          "signing_secret": { "type": "string" },
+          "region_iso": { "type": ["string", "null"] },
+          "min_risk_level": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "BatchCorridorStatusRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "region": { "type": ["string", "null"] },
+          "corridor_names": { "type": ["array", "null"], "items": { "type": "string" } },
+          "segment_ids": { "type": ["array", "null"], "items": { "type": "string", "format": "uuid" } },
+          "limit": { "type": ["integer", "null"] }
+        }
+      },
+      "BatchCorridorStatusResponse": {
+        "type": "object",
+        "required": ["generated_at", "total_matched", "summary", "items"],
+        "properties": {
+          "generated_at": { "type": "string", "format": "date-time" },
+          "region": { "type": ["string", "null"] },
+          "total_matched": { "type": "integer" },
+          "summary": { "type": "object", "additionalProperties": true },
+          "items": { "type": "array", "items": { "type": "object", "additionalProperties": true } }
         }
       }
     }

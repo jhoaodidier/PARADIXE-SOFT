@@ -47,6 +47,7 @@ pub struct ApiMetrics {
     pub alerts_dispatched: AtomicU64,
     pub evidence_uploads: AtomicU64,
     pub sse_connections: AtomicU64,
+    pub b2b_webhooks_dispatched: AtomicU64,
 }
 
 impl ApiMetrics {
@@ -76,6 +77,9 @@ impl ApiMetrics {
                 "# HELP paradixe_sse_connections_total Total SSE stream subscriptions opened\n",
                 "# TYPE paradixe_sse_connections_total counter\n",
                 "paradixe_sse_connections_total {}\n",
+                "# HELP paradixe_b2b_webhooks_dispatched_total Outbound signed B2B webhook deliveries\n",
+                "# TYPE paradixe_b2b_webhooks_dispatched_total counter\n",
+                "paradixe_b2b_webhooks_dispatched_total {}\n",
             ),
             self.routing_total.load(Ordering::Relaxed),
             self.routing_alternate.load(Ordering::Relaxed),
@@ -86,6 +90,7 @@ impl ApiMetrics {
             self.alerts_dispatched.load(Ordering::Relaxed),
             self.evidence_uploads.load(Ordering::Relaxed),
             self.sse_connections.load(Ordering::Relaxed),
+            self.b2b_webhooks_dispatched.load(Ordering::Relaxed),
         )
     }
 }
@@ -245,65 +250,135 @@ pub fn dispatch_corridor_alerts(
             }
         };
 
-        if rows.is_empty() {
-            return;
+        if !rows.is_empty() {
+            match messaging_url {
+                None => {
+                    tracing::info!(
+                        corridor = %corridor_name,
+                        subscribers = rows.len(),
+                        "Fleet alert preview generated (MESSAGING_INTERNAL_URL unset)"
+                    );
+                    metrics
+                        .alerts_dispatched
+                        .fetch_add(rows.len() as u64, Ordering::Relaxed);
+                }
+                Some(ref base_url) => {
+                    let dispatch_url = format!("{base_url}/internal/dispatch");
+                    for row in rows {
+                        let Ok(phone): Result<String, _> = row.try_get("phone_e164") else {
+                            continue;
+                        };
+                        let Ok(channel): Result<String, _> = row.try_get("channel") else {
+                            continue;
+                        };
+                        let Ok(payload) = serde_json::to_vec(&serde_json::json!({
+                            "recipient_phone_e164": phone,
+                            "channel": channel,
+                            "message": message,
+                        })) else {
+                            continue;
+                        };
+                        let sig = sign_webhook_payload(&secret, &payload);
+                        match http
+                            .post(&dispatch_url)
+                            .timeout(Duration::from_secs(4))
+                            .header("Content-Type", "application/json")
+                            .header("X-Webhook-Signature", sig)
+                            .body(payload)
+                            .send()
+                            .await
+                        {
+                            Ok(resp) if resp.status().is_success() => {
+                                metrics.alerts_dispatched.fetch_add(1, Ordering::Relaxed);
+                            }
+                            Ok(resp) => {
+                                tracing::warn!(
+                                    status = %resp.status(),
+                                    corridor = %corridor_name,
+                                    "Messaging internal dispatch returned non-2xx"
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    error = %e,
+                                    corridor = %corridor_name,
+                                    "Messaging internal dispatch request failed"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
         }
 
-        let Some(base_url) = messaging_url else {
-            tracing::info!(
-                corridor = %corridor_name,
-                subscribers = rows.len(),
-                "Fleet alert preview generated (MESSAGING_INTERNAL_URL unset)"
-            );
-            metrics
-                .alerts_dispatched
-                .fetch_add(rows.len() as u64, Ordering::Relaxed);
-            return;
+        // Dispatch signed B2B webhooks matching severity threshold.
+        let b2b_rows = match sqlx::query(
+            "SELECT webhook_id, target_url, signing_secret
+             FROM b2b_webhook_endpoints
+             WHERE is_active = TRUE
+               AND min_risk_level = ANY($1::text[])",
+        )
+        .bind(allowed_thresholds)
+        .fetch_all(&pool)
+        .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed querying B2B webhook endpoints");
+                return;
+            }
         };
 
-        let dispatch_url = format!("{base_url}/internal/dispatch");
-        for row in rows {
-            let Ok(phone): Result<String, _> = row.try_get("phone_e164") else {
+        let timestamp_str = Utc::now().to_rfc3339();
+        for row in b2b_rows {
+            let Ok(webhook_id): Result<Uuid, _> = row.try_get("webhook_id") else {
                 continue;
             };
-            let Ok(channel): Result<String, _> = row.try_get("channel") else {
+            let Ok(target_url): Result<String, _> = row.try_get("target_url") else {
+                continue;
+            };
+            let Ok(wh_secret): Result<String, _> = row.try_get("signing_secret") else {
                 continue;
             };
             let Ok(payload) = serde_json::to_vec(&serde_json::json!({
-                "recipient_phone_e164": phone,
-                "channel": channel,
+                "event": "CORRIDOR_ALERT",
+                "corridor_name": corridor_name,
+                "severity": severity,
                 "message": message,
+                "timestamp": timestamp_str,
             })) else {
                 continue;
             };
-            let sig = sign_webhook_payload(&secret, &payload);
-            match http
-                .post(&dispatch_url)
+            let sig = sign_webhook_payload(wh_secret.as_bytes(), &payload);
+            let status_code: i16 = match http
+                .post(&target_url)
                 .timeout(Duration::from_secs(4))
                 .header("Content-Type", "application/json")
-                .header("X-Webhook-Signature", sig)
+                .header("X-Paradixe-Event", "CORRIDOR_ALERT")
+                .header("X-Paradixe-Timestamp", &timestamp_str)
+                .header("X-Paradixe-Signature", sig)
                 .body(payload)
                 .send()
                 .await
             {
-                Ok(resp) if resp.status().is_success() => {
-                    metrics.alerts_dispatched.fetch_add(1, Ordering::Relaxed);
-                }
                 Ok(resp) => {
-                    tracing::warn!(
-                        status = %resp.status(),
-                        corridor = %corridor_name,
-                        "Messaging internal dispatch returned non-2xx"
-                    );
+                    metrics
+                        .b2b_webhooks_dispatched
+                        .fetch_add(1, Ordering::Relaxed);
+                    i16::try_from(resp.status().as_u16()).unwrap_or(500)
                 }
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        corridor = %corridor_name,
-                        "Messaging internal dispatch request failed"
-                    );
-                }
-            }
+                Err(_) => 0,
+            };
+
+            let _ = sqlx::query(
+                "UPDATE b2b_webhook_endpoints
+                 SET last_delivery_status = $2, last_delivered_at = NOW()
+                 WHERE webhook_id = $1",
+            )
+            .bind(webhook_id)
+            .bind(status_code)
+            .execute(&pool)
+            .await;
         }
     });
 }

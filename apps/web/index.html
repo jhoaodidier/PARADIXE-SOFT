@@ -6,19 +6,7 @@
     <meta name="color-scheme" content="light" />
     <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0b1120" media="(prefers-color-scheme: dark)" />
-    <script>
-      try {
-        var savedScheme = localStorage.getItem("color-scheme");
-        var meta = document.querySelector('meta[name="color-scheme"]');
-        if (meta) {
-          if (savedScheme === "dark" || savedScheme === "light") {
-            meta.content = savedScheme;
-          } else if (savedScheme === "system") {
-            meta.content = "light dark";
-          }
-        }
-      } catch (e) {}
-    </script>
+    <script src="/theme-init.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link

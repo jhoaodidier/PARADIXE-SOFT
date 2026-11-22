@@ -1187,6 +1187,7 @@ pub struct IncidentListItemDto {
     pub detected_at: DateTime<Utc>,
     pub confirmed_at: Option<DateTime<Utc>>,
     pub resolved_at: Option<DateTime<Utc>>,
+    pub evidence_photos: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1221,7 +1222,20 @@ pub async fn list_incidents(
                 i.verification_state, i.impact_passability,
                 ST_Y(i.hazard_location_geom) AS hazard_lat,
                 ST_X(i.hazard_location_geom) AS hazard_lon,
-                i.hazard_radius_m, i.detected_at, i.confirmed_at, i.resolved_at
+                i.hazard_radius_m, i.detected_at, i.confirmed_at, i.resolved_at,
+                COALESCE(
+                    ARRAY(
+                        SELECT fr.photo_uri
+                        FROM incident_report_links irl
+                        JOIN field_reports fr ON fr.report_id = irl.report_id
+                        WHERE irl.incident_id = i.incident_id
+                          AND fr.photo_uri IS NOT NULL
+                          AND BTRIM(fr.photo_uri) <> ''
+                        ORDER BY fr.captured_at_client DESC
+                        LIMIT 4
+                    ),
+                    ARRAY[]::text[]
+                ) AS evidence_photos
          FROM incidents i
          JOIN road_segments rs ON rs.segment_id = i.segment_id
          WHERE ($1::text IS NULL OR i.verification_state = $1)
@@ -1253,6 +1267,7 @@ pub async fn list_incidents(
             detected_at: row.try_get("detected_at").map_err(ApiError::from_db)?,
             confirmed_at: row.try_get("confirmed_at").map_err(ApiError::from_db)?,
             resolved_at: row.try_get("resolved_at").map_err(ApiError::from_db)?,
+            evidence_photos: row.try_get("evidence_photos").map_err(ApiError::from_db)?,
         });
     }
 

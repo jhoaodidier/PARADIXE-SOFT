@@ -59,6 +59,7 @@ async fn setup_harness() -> TestHarness {
 
     let key_dir = std::env::temp_dir().join(format!("paradixe_keys_{}", Uuid::new_v4()));
     let config = Arc::new(AppConfig {
+        is_production: false,
         api_bind_addr: "127.0.0.1:0".to_string(),
         database_url: SecretString::from(database_url.clone()),
         simulator_database_url: SecretString::from(simulator_database_url.clone()),

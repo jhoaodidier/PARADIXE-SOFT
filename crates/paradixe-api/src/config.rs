@@ -6,6 +6,7 @@ use secrecy::SecretString;
 
 #[derive(Clone)]
 pub struct AppConfig {
+    pub is_production: bool,
     pub api_bind_addr: String,
     pub database_url: SecretString,
     pub simulator_database_url: SecretString,
@@ -48,6 +49,9 @@ impl AppConfig {
             return Err("WHATSAPP_WEBHOOK_SECRET must be at least 16 bytes".to_string());
         }
 
+        let is_production = std::env::var("APP_ENV")
+            .map(|v| v.trim().eq_ignore_ascii_case("production"))
+            .unwrap_or(false);
         let api_bind_addr =
             std::env::var("API_BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
         let jwt_access_ttl_min = std::env::var("JWT_ACCESS_TTL_MIN")
@@ -100,6 +104,7 @@ impl AppConfig {
             .unwrap_or_else(|| "/evidence".to_string());
 
         Ok(Self {
+            is_production,
             api_bind_addr,
             database_url: SecretString::from(database_url),
             simulator_database_url: SecretString::from(simulator_database_url),

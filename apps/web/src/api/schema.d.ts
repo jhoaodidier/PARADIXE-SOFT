@@ -625,7 +625,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Lista incidentes viales registrados */
+        /** Lista incidentes viales registrados con fotos de evidencia */
         get: operations["listIncidents"];
         put?: never;
         post?: never;
@@ -684,6 +684,110 @@ export interface paths {
         head?: never;
         /** Revalida la inspeccion tecnica de seguridad de un corredor de transbordo */
         patch: operations["inspectTransferCorridor"];
+        trace?: never;
+    };
+    "/routing/multi-stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Calcula ruta segura con multiples paradas intermedias (2 a 6 nodos) */
+        post: operations["calculateMultiStopRouting"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/b2b/api-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista API keys B2B activas o revocadas */
+        get: operations["listB2bApiKeys"];
+        put?: never;
+        /** Emite una nueva API key B2B para integracion ERP/TMS (solo COER_ADMIN) */
+        post: operations["createB2bApiKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/b2b/api-keys/{api_key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoca inmediatamente una API key B2B */
+        delete: operations["revokeB2bApiKey"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/b2b/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista endpoints webhook B2B salientes firmados */
+        get: operations["listB2bWebhooks"];
+        put?: never;
+        /** Registra webhook HTTPS saliente con validacion anti-SSRF y secreto HMAC */
+        post: operations["createB2bWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/b2b/webhooks/{webhook_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Elimina un webhook saliente B2B */
+        delete: operations["deleteB2bWebhook"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/b2b/corridors/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Consulta masiva del estado de transitabilidad e IVV para flotas B2B */
+        post: operations["batchCorridorsStatus"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
 }
@@ -1328,6 +1432,142 @@ export interface components {
             inspection_valid_days: number;
             requires_revalidation: boolean;
             cargo_types: components["schemas"]["CargoType"][];
+        };
+        IncidentListItem: {
+            /** Format: uuid */
+            incident_id: string;
+            /** Format: uuid */
+            segment_id: string;
+            corridor_name: string;
+            trigger_source: string;
+            verification_state: components["schemas"]["VerificationState"];
+            impact_passability: components["schemas"]["PassabilityState"];
+            hazard_lat: number;
+            hazard_lon: number;
+            hazard_radius_m: number;
+            /** Format: date-time */
+            detected_at: string;
+            /** Format: date-time */
+            confirmed_at?: string | null;
+            /** Format: date-time */
+            resolved_at?: string | null;
+            evidence_photos: string[];
+        };
+        IncidentsListResponse: {
+            incidents: components["schemas"]["IncidentListItem"][];
+        };
+        MultiStopRoutingRequest: {
+            stop_node_ids: string[];
+            vehicle_category_code: components["schemas"]["VehicleCategoryCode"];
+            cargo_type: components["schemas"]["CargoType"];
+            cargo_payload_kg?: number | null;
+            patient_count?: number | null;
+        };
+        MultiStopLegDto: {
+            leg_index: number;
+            /** Format: uuid */
+            origin_node_id: string;
+            /** Format: uuid */
+            destination_node_id: string;
+            resolution: components["schemas"]["RoutingCalculateResponse"];
+        };
+        MultiStopRoutingResponse: {
+            overall_status: string;
+            blocking_reason_code?: string | null;
+            total_distance_km: number;
+            estimated_time_min: number;
+            max_ivv_on_route: number;
+            economic_impact?: {
+                [key: string]: unknown;
+            } | null;
+            legs: components["schemas"]["MultiStopLegDto"][];
+        };
+        ApiKeySummaryDto: {
+            /** Format: uuid */
+            api_key_id: string;
+            organization_name: string;
+            key_prefix: string;
+            role_code: string;
+            rate_limit_rpm: number;
+            is_active: boolean;
+            /** Format: date-time */
+            last_used_at?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            revoked_at?: string | null;
+        };
+        ApiKeysListResponse: {
+            api_keys: components["schemas"]["ApiKeySummaryDto"][];
+        };
+        CreateApiKeyRequest: {
+            organization_name: string;
+            role_code?: string | null;
+            rate_limit_rpm?: number | null;
+        };
+        CreateApiKeyResponse: {
+            /** Format: uuid */
+            api_key_id: string;
+            organization_name: string;
+            key_prefix: string;
+            raw_api_key: string;
+            role_code: string;
+            rate_limit_rpm: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        WebhookEndpointDto: {
+            /** Format: uuid */
+            webhook_id: string;
+            organization_name: string;
+            target_url: string;
+            masked_secret: string;
+            region_iso?: string | null;
+            min_risk_level: string;
+            is_active: boolean;
+            last_delivery_status?: number | null;
+            /** Format: date-time */
+            last_delivered_at?: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        WebhooksListResponse: {
+            webhooks: components["schemas"]["WebhookEndpointDto"][];
+        };
+        CreateWebhookRequest: {
+            organization_name: string;
+            target_url: string;
+            region_iso?: string | null;
+            min_risk_level?: string | null;
+        };
+        CreateWebhookResponse: {
+            /** Format: uuid */
+            webhook_id: string;
+            organization_name: string;
+            target_url: string;
+            signing_secret: string;
+            region_iso?: string | null;
+            min_risk_level: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        BatchCorridorStatusRequest: {
+            region?: string | null;
+            corridor_names?: string[] | null;
+            segment_ids?: string[] | null;
+            limit?: number | null;
+        };
+        BatchCorridorStatusResponse: {
+            /** Format: date-time */
+            generated_at: string;
+            region?: string | null;
+            total_matched: number;
+            summary: {
+                [key: string]: unknown;
+            };
+            items: {
+                [key: string]: unknown;
+            }[];
         };
     };
     responses: {
@@ -2349,7 +2589,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["IncidentsListResponse"];
+                };
             };
         };
     };
@@ -2424,6 +2666,195 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    calculateMultiStopRouting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MultiStopRoutingRequest"];
+            };
+        };
+        responses: {
+            /** @description Resolucion multiparada determinista */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MultiStopRoutingResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["ValidationError"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listB2bApiKeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Listado de API keys sin secreto completo */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeysListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createB2bApiKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateApiKeyRequest"];
+            };
+        };
+        responses: {
+            /** @description API key creada con secreto mostrado una sola vez */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateApiKeyResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    revokeB2bApiKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                api_key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description API key revocada */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listB2bWebhooks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Webhooks registrados con secreto enmascarado */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhooksListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createB2bWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateWebhookRequest"];
+            };
+        };
+        responses: {
+            /** @description Webhook creado */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateWebhookResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    deleteB2bWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                webhook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Webhook eliminado */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    batchCorridorsStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchCorridorStatusRequest"];
+            };
+        };
+        responses: {
+            /** @description Resumen y estado por tramo */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchCorridorStatusResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
         };
     };
 }

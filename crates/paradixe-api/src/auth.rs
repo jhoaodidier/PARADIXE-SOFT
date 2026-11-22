@@ -9,7 +9,12 @@ use argon2::{
 };
 use axum::{
     extract::{FromRequestParts, State},
-    http::{header::AUTHORIZATION, request::Parts, StatusCode},
+    http::{
+        header::{HeaderName, AUTHORIZATION},
+        request::Parts,
+        StatusCode,
+    },
+    response::IntoResponse,
     Json,
 };
 use chrono::{DateTime, Duration, Utc};
@@ -134,18 +139,78 @@ impl FromRequestParts<AppState> for AuthUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let header = parts
+        if let Some(header) = parts
             .headers
             .get(AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
-            .ok_or_else(|| ApiError::unauthorized("Missing Authorization bearer header"))?;
+        {
+            let token = header
+                .strip_prefix("Bearer ")
+                .or_else(|| header.strip_prefix("bearer "))
+                .ok_or_else(|| ApiError::unauthorized("Invalid Authorization scheme"))?;
 
-        let token = header
-            .strip_prefix("Bearer ")
-            .or_else(|| header.strip_prefix("bearer "))
-            .ok_or_else(|| ApiError::unauthorized("Invalid Authorization scheme"))?;
+            return decode_access_token(token, state.config.jwt_secret.expose_secret().as_bytes());
+        }
 
-        decode_access_token(token, state.config.jwt_secret.expose_secret().as_bytes())
+        if let Some(raw_key) = parts
+            .headers
+            .get("x-api-key")
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let key_hash = sha256_hex(raw_key);
+            let row = sqlx::query(
+                "SELECT k.api_key_id, k.owner_user_id, k.role_code, k.rate_limit_rpm, u.is_active
+                 FROM b2b_api_keys k
+                 JOIN users u ON u.user_id = k.owner_user_id
+                 WHERE k.key_hash = $1
+                   AND k.is_active = TRUE
+                   AND k.revoked_at IS NULL",
+            )
+            .bind(&key_hash)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(ApiError::from_db)?
+            .ok_or_else(|| ApiError::unauthorized("Invalid or revoked API key"))?;
+
+            let owner_active: bool = row.try_get("is_active").map_err(ApiError::from_db)?;
+            if !owner_active {
+                return Err(ApiError::unauthorized("API key owner account is inactive"));
+            }
+
+            let api_key_id: Uuid = row.try_get("api_key_id").map_err(ApiError::from_db)?;
+            let owner_user_id: Uuid = row.try_get("owner_user_id").map_err(ApiError::from_db)?;
+            let role_str: String = row.try_get("role_code").map_err(ApiError::from_db)?;
+            let rpm: i32 = row.try_get("rate_limit_rpm").map_err(ApiError::from_db)?;
+            let role = RoleCode::parse(&role_str)
+                .ok_or_else(|| ApiError::unauthorized("Invalid role on API key"))?;
+
+            state.rate_limiter.check_and_record(
+                &format!("apikey:{api_key_id}"),
+                usize::try_from(rpm).unwrap_or(120),
+                Duration::minutes(1),
+            )?;
+
+            let pool = state.pool.clone();
+            tokio::spawn(async move {
+                let _ = sqlx::query(
+                    "UPDATE b2b_api_keys SET last_used_at = NOW() WHERE api_key_id = $1",
+                )
+                .bind(api_key_id)
+                .execute(&pool)
+                .await;
+            });
+
+            return Ok(AuthUser {
+                user_id: owner_user_id,
+                role,
+            });
+        }
+
+        Err(ApiError::unauthorized(
+            "Missing Authorization bearer header or X-API-Key",
+        ))
     }
 }
 
@@ -634,7 +699,7 @@ pub async fn logout(
     State(state): State<AppState>,
     auth: AuthUser,
     ValidatedJson(body): ValidatedJson<RefreshRequest>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<impl IntoResponse, ApiError> {
     let token_hash = sha256_hex(body.refresh_token.trim());
     sqlx::query(
         "UPDATE auth_refresh_tokens
@@ -648,13 +713,19 @@ pub async fn logout(
     .await
     .map_err(ApiError::from_db)?;
 
-    Ok(StatusCode::NO_CONTENT)
+    Ok((
+        StatusCode::NO_CONTENT,
+        [(
+            HeaderName::from_static("clear-site-data"),
+            "\"cookies\", \"storage\", \"cache\"",
+        )],
+    ))
 }
 
 pub async fn revoke_all_sessions(
     State(state): State<AppState>,
     auth: AuthUser,
-) -> Result<StatusCode, ApiError> {
+) -> Result<impl IntoResponse, ApiError> {
     let mut tx = state.pool.begin().await.map_err(ApiError::from_db)?;
 
     let updated = sqlx::query(
@@ -679,7 +750,13 @@ pub async fn revoke_all_sessions(
     .await?;
 
     tx.commit().await.map_err(ApiError::from_db)?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok((
+        StatusCode::NO_CONTENT,
+        [(
+            HeaderName::from_static("clear-site-data"),
+            "\"cookies\", \"storage\", \"cache\"",
+        )],
+    ))
 }
 
 #[derive(Debug, Serialize)]

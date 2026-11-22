@@ -59,11 +59,17 @@ describe("Contrato OpenAPI 3.1 PARADIXE SOFT", () => {
       "/operations/bridges",
       "/transfer-corridors",
       "/transfer-corridors/{corridor_id}/inspect",
+      "/routing/multi-stop",
+      "/b2b/api-keys",
+      "/b2b/api-keys/{api_key_id}",
+      "/b2b/webhooks",
+      "/b2b/webhooks/{webhook_id}",
+      "/b2b/corridors/status",
     ];
     for (const path of [...corePaths, ...extendedPaths]) {
       expect(spec.paths[path]).toBeDefined();
     }
-    expect(Object.keys(spec.paths).length).toBeGreaterThanOrEqual(40);
+    expect(Object.keys(spec.paths).length).toBeGreaterThanOrEqual(46);
   });
 
   it("incluye los 11 reason_code de NO_SAFE_ROUTE y esquemas discriminados estrictos", () => {

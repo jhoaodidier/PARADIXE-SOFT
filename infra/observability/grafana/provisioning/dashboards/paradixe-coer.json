@@ -1,0 +1,79 @@
+{
+  "id": null,
+  "uid": "paradixe-coer-ops",
+  "title": "PARADIXE SOFT — Operación Vial y B2B",
+  "tags": ["paradixe", "coer", "routing"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Cálculos de Ruteo Totales",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "paradixe_routing_requests_total", "refId": "A" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Incidentes Confirmados",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        { "expr": "paradixe_incidents_confirmed_total", "refId": "A" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Suscripciones SSE Abiertas",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "targets": [
+        { "expr": "paradixe_sse_connections_total", "refId": "A" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Webhooks B2B y Alertas Enviadas",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+      "targets": [
+        { "expr": "paradixe_alerts_dispatched_total + paradixe_b2b_webhooks_dispatched_total", "refId": "A" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Resoluciones de Ruteo (Tasa/s)",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 6 },
+      "targets": [
+        {
+          "expr": "rate(paradixe_routing_outcomes_total[5m])",
+          "legendFormat": "{{resolution}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Reportes de Campo y Evidencias S3",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 6 },
+      "targets": [
+        {
+          "expr": "increase(paradixe_field_reports_created_total[15m])",
+          "legendFormat": "Reportes",
+          "refId": "A"
+        },
+        {
+          "expr": "increase(paradixe_evidence_uploads_total[15m])",
+          "legendFormat": "Fotos S3",
+          "refId": "B"
+        }
+      ]
+    }
+  ]
+}

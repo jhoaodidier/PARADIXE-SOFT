@@ -552,19 +552,22 @@ async fn compute_route_economic_impact(
     })
 }
 
-pub async fn calculate_route_handler(
-    State(state): State<AppState>,
-    _auth: AuthUser,
-    ValidatedJson(body): ValidatedJson<RoutingCalculateRequest>,
-) -> Result<Json<RoutingCalculateResponseDto>, ApiError> {
-    validate_cargo_request(body.cargo_type, body.cargo_payload_kg, body.patient_count)?;
+struct RoutingSharedContext {
+    evaluation_time: DateTime<Utc>,
+    vehicle: VehicleCategorySpec,
+    config: RoutingConfig,
+    humanitarian_windows: Vec<HumanitarianWindowSpec>,
+    transfer_corridors: Vec<TransferCorridorSpec>,
+    corridor_node_ids: Vec<Uuid>,
+}
 
+async fn load_routing_shared_context(
+    state: &AppState,
+    vehicle_category_code: VehicleCategoryCode,
+) -> Result<RoutingSharedContext, ApiError> {
     let evaluation_time = Utc::now();
-    let vehicle = load_vehicle_spec(&state.pool, body.vehicle_category_code).await?;
+    let vehicle = load_vehicle_spec(&state.pool, vehicle_category_code).await?;
     let config = load_active_routing_config(&state.pool).await?;
-
-    let endpoint_bbox =
-        load_endpoint_bbox(&state.pool, body.origin_node_id, body.destination_node_id).await?;
 
     let win_rows = sqlx::query(
         "SELECT i.segment_id, vc.code AS vehicle_code, hw.direction, hw.starts_at, hw.ends_at
@@ -719,9 +722,29 @@ pub async fn calculate_route_handler(
         });
     }
 
+    Ok(RoutingSharedContext {
+        evaluation_time,
+        vehicle,
+        config,
+        humanitarian_windows,
+        transfer_corridors,
+        corridor_node_ids,
+    })
+}
+
+async fn compute_single_leg(
+    state: &AppState,
+    ctx: &RoutingSharedContext,
+    origin_node_id: Uuid,
+    destination_node_id: Uuid,
+    body: &RoutingCalculateRequest,
+) -> Result<RoutingCalculateResponseDto, ApiError> {
+    let endpoint_bbox =
+        load_endpoint_bbox(&state.pool, origin_node_id, destination_node_id).await?;
+
     let request = RoutingRequest {
-        origin_node_id: body.origin_node_id,
-        destination_node_id: body.destination_node_id,
+        origin_node_id,
+        destination_node_id,
         vehicle_category_code: body.vehicle_category_code,
         cargo_type: body.cargo_type,
         cargo_payload_kg: body.cargo_payload_kg,
@@ -732,22 +755,22 @@ pub async fn calculate_route_handler(
         &state.pool,
         endpoint_bbox,
         0.40,
-        body.origin_node_id,
-        body.destination_node_id,
-        &corridor_node_ids,
-        evaluation_time,
+        origin_node_id,
+        destination_node_id,
+        &ctx.corridor_node_ids,
+        ctx.evaluation_time,
     )
     .await?;
 
     let mut resolution = calculate_route(&RoutingInput {
-        vehicle: vehicle.clone(),
+        vehicle: ctx.vehicle.clone(),
         nodes,
         segments,
-        transfer_corridors: transfer_corridors.clone(),
-        humanitarian_windows: humanitarian_windows.clone(),
-        config: config.clone(),
+        transfer_corridors: ctx.transfer_corridors.clone(),
+        humanitarian_windows: ctx.humanitarian_windows.clone(),
+        config: ctx.config.clone(),
         request: request.clone(),
-        evaluation_time,
+        evaluation_time: ctx.evaluation_time,
     });
 
     if matches!(
@@ -763,21 +786,21 @@ pub async fn calculate_route_handler(
             &state.pool,
             endpoint_bbox,
             1.60,
-            body.origin_node_id,
-            body.destination_node_id,
-            &corridor_node_ids,
-            evaluation_time,
+            origin_node_id,
+            destination_node_id,
+            &ctx.corridor_node_ids,
+            ctx.evaluation_time,
         )
         .await?;
         resolution = calculate_route(&RoutingInput {
-            vehicle,
+            vehicle: ctx.vehicle.clone(),
             nodes: wide_nodes,
             segments: wide_segments,
-            transfer_corridors,
-            humanitarian_windows,
-            config,
+            transfer_corridors: ctx.transfer_corridors.clone(),
+            humanitarian_windows: ctx.humanitarian_windows.clone(),
+            config: ctx.config.clone(),
             request,
-            evaluation_time,
+            evaluation_time: ctx.evaluation_time,
         });
     }
 
@@ -816,8 +839,187 @@ pub async fn calculate_route_handler(
     {
         *economic_impact = econ_impact;
     }
+    Ok(dto)
+}
+
+pub async fn calculate_route_handler(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    ValidatedJson(body): ValidatedJson<RoutingCalculateRequest>,
+) -> Result<Json<RoutingCalculateResponseDto>, ApiError> {
+    state.rate_limiter.check_and_record(
+        &format!("routing:{}", auth.user_id),
+        120,
+        Duration::minutes(1),
+    )?;
+    validate_cargo_request(body.cargo_type, body.cargo_payload_kg, body.patient_count)?;
+
+    let ctx = load_routing_shared_context(&state, body.vehicle_category_code).await?;
+    let dto = compute_single_leg(
+        &state,
+        &ctx,
+        body.origin_node_id,
+        body.destination_node_id,
+        &body,
+    )
+    .await?;
 
     Ok(Json(dto))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MultiStopRoutingRequest {
+    pub stop_node_ids: Vec<Uuid>,
+    pub vehicle_category_code: VehicleCategoryCode,
+    pub cargo_type: CargoType,
+    pub cargo_payload_kg: Option<Decimal>,
+    pub patient_count: Option<u8>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MultiStopLegDto {
+    pub leg_index: usize,
+    pub origin_node_id: Uuid,
+    pub destination_node_id: Uuid,
+    pub resolution: RoutingCalculateResponseDto,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MultiStopRoutingResponse {
+    pub overall_status: String,
+    pub blocking_reason_code: Option<NoSafeRouteReasonCode>,
+    pub total_distance_km: f64,
+    pub estimated_time_min: f64,
+    pub max_ivv_on_route: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub economic_impact: Option<RouteEconomicImpactDto>,
+    pub legs: Vec<MultiStopLegDto>,
+}
+
+pub async fn calculate_multi_stop_handler(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    ValidatedJson(body): ValidatedJson<MultiStopRoutingRequest>,
+) -> Result<Json<MultiStopRoutingResponse>, ApiError> {
+    state.rate_limiter.check_and_record(
+        &format!("routing:{}", auth.user_id),
+        120,
+        Duration::minutes(1),
+    )?;
+    if body.stop_node_ids.len() < 2 || body.stop_node_ids.len() > 6 {
+        return Err(ApiError::validation(
+            "stop_node_ids must include between 2 and 6 stops",
+        ));
+    }
+    for pair in body.stop_node_ids.windows(2) {
+        if pair[0] == pair[1] {
+            return Err(ApiError::validation(
+                "Adjacent stop_node_ids must be distinct nodes",
+            ));
+        }
+    }
+    validate_cargo_request(body.cargo_type, body.cargo_payload_kg, body.patient_count)?;
+
+    let ctx = load_routing_shared_context(&state, body.vehicle_category_code).await?;
+    let mut legs = Vec::with_capacity(body.stop_node_ids.len() - 1);
+    let mut all_alternate = true;
+    let mut any_bridge = false;
+    let mut blocking_reason_code: Option<NoSafeRouteReasonCode> = None;
+
+    let mut total_distance_km = 0.0_f64;
+    let mut estimated_time_min = 0.0_f64;
+    let mut max_ivv_on_route = 0.0_f64;
+    let mut sum_co2 = 0.0_f64;
+    let mut sum_base_co2 = 0.0_f64;
+    let mut sum_co2_delta = 0.0_f64;
+    let mut sum_loss_avoided = 0.0_f64;
+    let mut sum_time_saved = 0.0_f64;
+    let mut has_econ = false;
+
+    for (leg_index, pair) in body.stop_node_ids.windows(2).enumerate() {
+        let req = RoutingCalculateRequest {
+            origin_node_id: pair[0],
+            destination_node_id: pair[1],
+            vehicle_category_code: body.vehicle_category_code,
+            cargo_type: body.cargo_type,
+            cargo_payload_kg: body.cargo_payload_kg,
+            patient_count: body.patient_count,
+        };
+        let res = compute_single_leg(&state, &ctx, pair[0], pair[1], &req).await?;
+        match &res {
+            RoutingCalculateResponseDto::AlternateRoute {
+                total_distance_km: d,
+                estimated_time_min: t,
+                max_ivv_on_route: ivv,
+                economic_impact,
+                ..
+            } => {
+                total_distance_km += decimal_to_f64(*d);
+                estimated_time_min += decimal_to_f64(*t);
+                max_ivv_on_route = max_ivv_on_route.max(decimal_to_f64(*ivv));
+                if let Some(ei) = economic_impact {
+                    has_econ = true;
+                    sum_co2 += ei.estimated_co2_kg;
+                    sum_base_co2 += ei.baseline_blockage_co2_kg;
+                    sum_co2_delta += ei.co2_delta_kg;
+                    sum_loss_avoided += ei.estimated_cargo_loss_avoided_usd;
+                    sum_time_saved += ei.time_saved_vs_blockage_min;
+                }
+            }
+            RoutingCalculateResponseDto::LogisticBridgeRequired { .. } => {
+                all_alternate = false;
+                any_bridge = true;
+            }
+            RoutingCalculateResponseDto::NoSafeRoute { reason_code, .. } => {
+                all_alternate = false;
+                if blocking_reason_code.is_none() {
+                    blocking_reason_code = Some(*reason_code);
+                }
+            }
+        }
+        legs.push(MultiStopLegDto {
+            leg_index,
+            origin_node_id: pair[0],
+            destination_node_id: pair[1],
+            resolution: res,
+        });
+    }
+
+    let overall_status = if blocking_reason_code.is_some() {
+        "NO_SAFE_ROUTE"
+    } else if all_alternate {
+        "COMPLETE"
+    } else if any_bridge {
+        "PARTIAL_BRIDGE_REQUIRED"
+    } else {
+        "NO_SAFE_ROUTE"
+    }
+    .to_string();
+
+    let round2 = |v: f64| (v * 100.0).round() / 100.0;
+    let economic_impact = if has_econ && blocking_reason_code.is_none() {
+        Some(RouteEconomicImpactDto {
+            estimated_co2_kg: round2(sum_co2),
+            baseline_blockage_co2_kg: round2(sum_base_co2),
+            co2_delta_kg: round2(sum_co2_delta),
+            estimated_cargo_loss_avoided_usd: round2(sum_loss_avoided),
+            time_saved_vs_blockage_min: round2(sum_time_saved),
+            reference_blockage_hours: 4.0,
+        })
+    } else {
+        None
+    };
+
+    Ok(Json(MultiStopRoutingResponse {
+        overall_status,
+        blocking_reason_code,
+        total_distance_km: round2(total_distance_km),
+        estimated_time_min: round2(estimated_time_min),
+        max_ivv_on_route: round2(max_ivv_on_route),
+        economic_impact,
+        legs,
+    }))
 }
 
 #[derive(Debug, Deserialize)]

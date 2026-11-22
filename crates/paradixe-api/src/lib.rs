@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod auth;
+pub mod b2b;
 pub mod config;
 pub mod corridors;
 pub mod error;
@@ -175,7 +176,11 @@ fn build_cors_layer(allowed_origins: &[String]) -> CorsLayer {
                     http::Method::DELETE,
                     http::Method::OPTIONS,
                 ])
-                .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+                .allow_headers([
+                    header::AUTHORIZATION,
+                    header::CONTENT_TYPE,
+                    header::HeaderName::from_static("x-api-key"),
+                ])
         }
     }
 }
@@ -242,6 +247,22 @@ pub fn build_router(state: AppState) -> Router {
         )
         // Routing, Transfer Corridors, Logistic Bridges & Humanitarian Windows
         .route("/routing/calculate", post(routing::calculate_route_handler))
+        .route(
+            "/routing/multi-stop",
+            post(routing::calculate_multi_stop_handler),
+        )
+        // B2B Fleet & ERP Integrations (API Keys + Signed Outbound Webhooks)
+        .route(
+            "/b2b/api-keys",
+            get(b2b::list_api_keys).post(b2b::create_api_key),
+        )
+        .route("/b2b/api-keys/{api_key_id}", delete(b2b::revoke_api_key))
+        .route(
+            "/b2b/webhooks",
+            get(b2b::list_webhooks).post(b2b::create_webhook),
+        )
+        .route("/b2b/webhooks/{webhook_id}", delete(b2b::delete_webhook))
+        .route("/b2b/corridors/status", post(b2b::batch_corridors_status))
         .route(
             "/operations/bridges",
             get(routing::list_bridges_and_windows),

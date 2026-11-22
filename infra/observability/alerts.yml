@@ -1,0 +1,33 @@
+groups:
+  - name: paradixe-operational-alerts
+    rules:
+      - alert: ParadixeApiDown
+        expr: up{job="paradixe-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "paradixe-api no responde al scrape de métricas"
+          description: "El endpoint /metrics de paradixe-api lleva más de 1 minuto inaccesible."
+
+      - alert: ParadixeHighNoSafeRouteRatio
+        expr: |
+          (
+            rate(paradixe_routing_outcomes_total{resolution="NO_SAFE_ROUTE"}[10m])
+            / clamp_min(rate(paradixe_routing_requests_total[10m]), 0.001)
+          ) > 0.6
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Alta tasa de rutas rechazadas por Fail-Safe"
+          description: "Más del 60% de solicitudes de ruteo en los últimos 10 min resultaron en NO_SAFE_ROUTE."
+
+      - alert: ParadixeConfirmedIncidentSurge
+        expr: increase(paradixe_incidents_confirmed_total[15m]) >= 5
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Incremento rápido de incidentes confirmados"
+          description: "Se confirmaron 5 o más incidentes viales en los últimos 15 minutos."
