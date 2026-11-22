@@ -1,0 +1,15 @@
+[package]
+name = "paradixe-ivv"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Layer 1 reproducible Dynamic Road Vulnerability Index (IVV) engine and JSON CLI"
+
+[dependencies]
+chrono.workspace = true
+paradixe-domain.workspace = true
+rust_decimal.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

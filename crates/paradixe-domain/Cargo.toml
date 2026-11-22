@@ -1,0 +1,16 @@
+[package]
+name = "paradixe-domain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Core domain types, fail-safe enums, and exact decimal arithmetic for PARADIXE SOFT"
+
+[dependencies]
+chrono.workspace = true
+rust_decimal.workspace = true
+serde.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
