@@ -13,8 +13,8 @@ use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 use crate::{
-    auth::{AuthUser, RoleCode},
-    error::{ApiError, ValidatedJson, ValidatedQuery},
+    auth::{write_audit_log, AuthUser, RoleCode},
+    error::{ApiError, ValidatedJson, ValidatedPath, ValidatedQuery},
     sync::append_sync_change,
     AppState,
 };
@@ -313,7 +313,20 @@ pub async fn get_corridors_map(
                      AND ST_Intersects(rs.geom, tu.bbox_geom)
                )
            )
-         ORDER BY rs.corridor_name ASC, rs.segment_id ASC
+         ORDER BY
+             (active_inc.impact_passability IS NOT NULL) DESC,
+             CASE rs.surface_type
+                 WHEN 'PAVED' THEN 1
+                 WHEN 'GRAVEL' THEN 2
+                 ELSE 3
+             END ASC,
+             CASE
+                 WHEN rs.corridor_name LIKE 'Acceso %' OR rs.corridor_name LIKE 'Red Vial %' THEN 2
+                 ELSE 1
+             END ASC,
+             rs.length_km DESC,
+             rs.corridor_name ASC,
+             rs.segment_id ASC
          LIMIT $7",
     )
     .bind(has_bbox)
@@ -407,6 +420,129 @@ pub async fn get_corridors_map(
         generated_at: now,
         features,
     }))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NodesListQuery {
+    pub region: Option<String>,
+    pub q: Option<String>,
+    pub node_type: Option<String>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RoadNodeDto {
+    pub node_id: Uuid,
+    pub name: String,
+    pub node_type: String,
+    pub elevation_m: i32,
+    pub lat: f64,
+    pub lon: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct NodesListResponse {
+    pub nodes: Vec<RoadNodeDto>,
+}
+
+pub async fn list_nodes(
+    State(state): State<AppState>,
+    ValidatedQuery(query): ValidatedQuery<NodesListQuery>,
+) -> Result<Json<NodesListResponse>, ApiError> {
+    let limit = query.limit.unwrap_or(40).clamp(1, 100);
+    let node_type = query
+        .node_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_uppercase);
+
+    if let Some(ref nt) = node_type {
+        if !matches!(
+            nt.as_str(),
+            "HOSPITAL" | "TOWN_CENTER" | "INTERSECTION" | "SAFE_TRANSFER_ZONE" | "TUNNEL_PORTAL"
+        ) {
+            return Err(ApiError::validation("Unsupported node_type filter"));
+        }
+    }
+
+    let region_code = query
+        .region
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
+    let q_pattern = query
+        .q
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            let escaped = s
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            format!("%{escaped}%")
+        });
+
+    let rows = sqlx::query(
+        "SELECT node_id, name, node_type, elevation_m, lat, lon
+         FROM (
+             SELECT DISTINCT ON (rn.node_type, LOWER(TRIM(rn.name)))
+                 rn.node_id,
+                 TRIM(rn.name) AS name,
+                 rn.node_type,
+                 rn.elevation_m,
+                 ST_Y(rn.location_geom) AS lat,
+                 ST_X(rn.location_geom) AS lon
+             FROM road_nodes rn
+             WHERE TRIM(rn.name) <> ''
+               AND ($1::text IS NULL OR rn.node_type = $1)
+               AND ($2::text IS NULL OR rn.name ILIKE $2 ESCAPE '\\')
+               AND (
+                   $3::text IS NULL
+                   OR EXISTS (
+                       SELECT 1 FROM territorial_units tu
+                       WHERE (UPPER(tu.iso_code) = UPPER($3) OR UPPER(tu.ubigeo_code) = UPPER($3))
+                         AND ST_Intersects(rn.location_geom, tu.bbox_geom)
+                   )
+               )
+             ORDER BY rn.node_type ASC, LOWER(TRIM(rn.name)) ASC, rn.elevation_m DESC, rn.node_id ASC
+         ) dedup
+         ORDER BY
+             CASE dedup.node_type
+                 WHEN 'HOSPITAL' THEN 1
+                 WHEN 'TOWN_CENTER' THEN 2
+                 WHEN 'TUNNEL_PORTAL' THEN 3
+                 WHEN 'SAFE_TRANSFER_ZONE' THEN 4
+                 ELSE 5
+             END ASC,
+             dedup.name ASC
+         LIMIT $4",
+    )
+    .bind(node_type)
+    .bind(q_pattern)
+    .bind(region_code)
+    .bind(limit)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(ApiError::from_db)?;
+
+    let mut nodes = Vec::with_capacity(rows.len());
+    for row in rows {
+        nodes.push(RoadNodeDto {
+            node_id: row.try_get("node_id").map_err(ApiError::from_db)?,
+            name: row.try_get("name").map_err(ApiError::from_db)?,
+            node_type: row.try_get("node_type").map_err(ApiError::from_db)?,
+            elevation_m: row.try_get("elevation_m").map_err(ApiError::from_db)?,
+            lat: row.try_get("lat").map_err(ApiError::from_db)?,
+            lon: row.try_get("lon").map_err(ApiError::from_db)?,
+        });
+    }
+
+    Ok(Json(NodesListResponse { nodes }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -614,4 +750,372 @@ pub async fn recalculate_ivv(
             revalidations_triggered,
         }),
     ))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VerifySegmentAttributesRequest {
+    pub road_width_m: Option<Decimal>,
+    pub max_supported_tons: Option<Decimal>,
+    pub max_slope_forward_pct: Option<Decimal>,
+    pub max_slope_reverse_pct: Option<Decimal>,
+    pub surface_type: Option<String>,
+    pub is_historical_hotspot: Option<bool>,
+    pub geometry_source: Option<String>,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VerifySegmentAttributesResponse {
+    pub segment_id: Uuid,
+    pub corridor_name: String,
+    pub surface_type: String,
+    #[serde(with = "rust_decimal::serde::float")]
+    pub road_width_m: Decimal,
+    #[serde(with = "rust_decimal::serde::float")]
+    pub max_supported_tons: Decimal,
+    #[serde(with = "rust_decimal::serde::float")]
+    pub max_slope_forward_pct: Decimal,
+    #[serde(with = "rust_decimal::serde::float_option")]
+    pub max_slope_reverse_pct: Option<Decimal>,
+    pub is_historical_hotspot: bool,
+    pub geometry_source: String,
+    pub attributes_verified_at: DateTime<Utc>,
+}
+
+fn validate_geometry_source(
+    raw: Option<&str>,
+    default_src: &'static str,
+) -> Result<String, ApiError> {
+    let val = raw
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(default_src);
+    if !matches!(val, "FIELD_SURVEY" | "OFFICIAL" | "OSM_CURATED") {
+        return Err(ApiError::validation(
+            "geometry_source must be FIELD_SURVEY, OFFICIAL, or OSM_CURATED",
+        ));
+    }
+    Ok(val.to_string())
+}
+
+pub async fn verify_segment_attributes(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    ValidatedPath(segment_id): ValidatedPath<Uuid>,
+    ValidatedJson(body): ValidatedJson<VerifySegmentAttributesRequest>,
+) -> Result<Json<VerifySegmentAttributesResponse>, ApiError> {
+    auth.require_roles(&[RoleCode::CoerAdmin, RoleCode::CivilDefense])?;
+
+    if let Some(w) = body.road_width_m {
+        if w <= Decimal::ZERO {
+            return Err(ApiError::validation("road_width_m must be > 0"));
+        }
+    }
+    if let Some(t) = body.max_supported_tons {
+        if t <= Decimal::ZERO {
+            return Err(ApiError::validation("max_supported_tons must be > 0"));
+        }
+    }
+    if let Some(sf) = body.max_slope_forward_pct {
+        if sf < Decimal::ZERO {
+            return Err(ApiError::validation("max_slope_forward_pct must be >= 0"));
+        }
+    }
+    if let Some(sr) = body.max_slope_reverse_pct {
+        if sr < Decimal::ZERO {
+            return Err(ApiError::validation("max_slope_reverse_pct must be >= 0"));
+        }
+    }
+    if let Some(ref st) = body.surface_type {
+        if !matches!(st.as_str(), "PAVED" | "GRAVEL" | "DIRT_TRACK") {
+            return Err(ApiError::validation(
+                "surface_type must be PAVED, GRAVEL, or DIRT_TRACK",
+            ));
+        }
+    }
+    let next_source = validate_geometry_source(body.geometry_source.as_deref(), "FIELD_SURVEY")?;
+
+    let now = Utc::now();
+    let mut tx = state.pool.begin().await.map_err(ApiError::from_db)?;
+
+    let before_row = sqlx::query(
+        "SELECT corridor_name, direction_type, road_width_m, max_supported_tons,
+                max_slope_forward_pct, max_slope_reverse_pct, surface_type,
+                is_historical_hotspot, geometry_source, attributes_verified_at
+         FROM road_segments
+         WHERE segment_id = $1
+         FOR UPDATE",
+    )
+    .bind(segment_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(ApiError::from_db)?
+    .ok_or_else(|| ApiError::not_found("Road segment not found"))?;
+
+    let corridor_name: String = before_row
+        .try_get("corridor_name")
+        .map_err(ApiError::from_db)?;
+    let direction_type: String = before_row
+        .try_get("direction_type")
+        .map_err(ApiError::from_db)?;
+    let prev_width: Decimal = before_row
+        .try_get("road_width_m")
+        .map_err(ApiError::from_db)?;
+    let prev_tons: Decimal = before_row
+        .try_get("max_supported_tons")
+        .map_err(ApiError::from_db)?;
+    let prev_slope_fwd: Decimal = before_row
+        .try_get("max_slope_forward_pct")
+        .map_err(ApiError::from_db)?;
+    let prev_slope_rev: Option<Decimal> = before_row
+        .try_get("max_slope_reverse_pct")
+        .map_err(ApiError::from_db)?;
+    let prev_surface: String = before_row
+        .try_get("surface_type")
+        .map_err(ApiError::from_db)?;
+    let prev_hotspot: bool = before_row
+        .try_get("is_historical_hotspot")
+        .map_err(ApiError::from_db)?;
+    let prev_source: String = before_row
+        .try_get("geometry_source")
+        .map_err(ApiError::from_db)?;
+    let prev_verified_at: Option<DateTime<Utc>> = before_row
+        .try_get("attributes_verified_at")
+        .map_err(ApiError::from_db)?;
+
+    if direction_type == "ONE_WAY" && body.max_slope_reverse_pct.is_some() {
+        return Err(ApiError::validation(
+            "ONE_WAY road segment must keep max_slope_reverse_pct null",
+        ));
+    }
+
+    let next_width = body.road_width_m.unwrap_or(prev_width);
+    let next_tons = body.max_supported_tons.unwrap_or(prev_tons);
+    let next_slope_fwd = body.max_slope_forward_pct.unwrap_or(prev_slope_fwd);
+    let next_slope_rev = if direction_type == "ONE_WAY" {
+        None
+    } else {
+        body.max_slope_reverse_pct.or(prev_slope_rev)
+    };
+    let next_surface = body.surface_type.unwrap_or_else(|| prev_surface.clone());
+    let next_hotspot = body.is_historical_hotspot.unwrap_or(prev_hotspot);
+
+    sqlx::query(
+        "UPDATE road_segments
+         SET road_width_m = $2,
+             max_supported_tons = $3,
+             max_slope_forward_pct = $4,
+             max_slope_reverse_pct = $5,
+             surface_type = $6,
+             is_historical_hotspot = $7,
+             geometry_source = $8,
+             attributes_verified_at = $9
+         WHERE segment_id = $1",
+    )
+    .bind(segment_id)
+    .bind(next_width)
+    .bind(next_tons)
+    .bind(next_slope_fwd)
+    .bind(next_slope_rev)
+    .bind(&next_surface)
+    .bind(next_hotspot)
+    .bind(&next_source)
+    .bind(now)
+    .execute(&mut *tx)
+    .await
+    .map_err(ApiError::from_db)?;
+
+    let before_json = json!({
+        "road_width_m": prev_width,
+        "max_supported_tons": prev_tons,
+        "max_slope_forward_pct": prev_slope_fwd,
+        "max_slope_reverse_pct": prev_slope_rev,
+        "surface_type": prev_surface,
+        "is_historical_hotspot": prev_hotspot,
+        "geometry_source": prev_source,
+        "attributes_verified_at": prev_verified_at
+    });
+    let after_json = json!({
+        "segment_id": segment_id,
+        "road_width_m": next_width,
+        "max_supported_tons": next_tons,
+        "max_slope_forward_pct": next_slope_fwd,
+        "max_slope_reverse_pct": next_slope_rev,
+        "surface_type": next_surface,
+        "is_historical_hotspot": next_hotspot,
+        "geometry_source": next_source,
+        "attributes_verified_at": now,
+        "notes": body.notes
+    });
+
+    append_sync_change(
+        &mut tx,
+        "ROAD_SEGMENT",
+        segment_id,
+        "UPSERT",
+        Some(after_json.clone()),
+    )
+    .await?;
+
+    write_audit_log(
+        &mut tx,
+        Some(auth.user_id),
+        "SEGMENT_ATTRIBUTES_VERIFIED",
+        "ROAD_SEGMENT",
+        segment_id,
+        Some(before_json),
+        after_json,
+    )
+    .await?;
+
+    tx.commit().await.map_err(ApiError::from_db)?;
+
+    Ok(Json(VerifySegmentAttributesResponse {
+        segment_id,
+        corridor_name,
+        surface_type: next_surface,
+        road_width_m: next_width,
+        max_supported_tons: next_tons,
+        max_slope_forward_pct: next_slope_fwd,
+        max_slope_reverse_pct: next_slope_rev,
+        is_historical_hotspot: next_hotspot,
+        geometry_source: next_source,
+        attributes_verified_at: now,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VerifyCorridorBatchRequest {
+    pub corridor_name: Option<String>,
+    pub region: Option<String>,
+    pub only_paved: Option<bool>,
+    pub geometry_source: Option<String>,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VerifyCorridorBatchResponse {
+    pub segments_verified: usize,
+    pub corridor_name: Option<String>,
+    pub region: Option<String>,
+    pub verified_at: DateTime<Utc>,
+}
+
+pub async fn verify_corridor_batch_attributes(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    ValidatedJson(body): ValidatedJson<VerifyCorridorBatchRequest>,
+) -> Result<Json<VerifyCorridorBatchResponse>, ApiError> {
+    auth.require_roles(&[RoleCode::CoerAdmin])?;
+
+    let corridor_name = body
+        .corridor_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let region = body
+        .region
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
+    if corridor_name.is_none() && region.is_none() {
+        return Err(ApiError::validation(
+            "corridor_name or region must be provided",
+        ));
+    }
+
+    let only_paved = body.only_paved.unwrap_or(false);
+    let next_source = validate_geometry_source(body.geometry_source.as_deref(), "OFFICIAL")?;
+    let now = Utc::now();
+
+    let mut tx = state.pool.begin().await.map_err(ApiError::from_db)?;
+
+    let updated_rows = sqlx::query(
+        "UPDATE road_segments rs
+         SET attributes_verified_at = $1,
+             geometry_source = $2
+         WHERE rs.is_topology_verified = TRUE
+           AND ($3::text IS NULL OR LOWER(TRIM(rs.corridor_name)) = LOWER(TRIM($3)))
+           AND ($4::boolean = FALSE OR rs.surface_type = 'PAVED')
+           AND (
+               $5::text IS NULL
+               OR EXISTS (
+                   SELECT 1 FROM territorial_units tu
+                   WHERE (UPPER(tu.iso_code) = UPPER($5) OR UPPER(tu.ubigeo_code) = UPPER($5))
+                     AND ST_Intersects(rs.geom, tu.bbox_geom)
+               )
+           )
+         RETURNING rs.segment_id, rs.corridor_name",
+    )
+    .bind(now)
+    .bind(&next_source)
+    .bind(&corridor_name)
+    .bind(only_paved)
+    .bind(&region)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(ApiError::from_db)?;
+
+    if updated_rows.is_empty() {
+        return Err(ApiError::not_found(
+            "No matching verified-topology road segments found",
+        ));
+    }
+
+    let segments_verified = updated_rows.len();
+    let mut first_segment_id = Uuid::nil();
+
+    for (idx, row) in updated_rows.into_iter().enumerate() {
+        let seg_id: Uuid = row.try_get("segment_id").map_err(ApiError::from_db)?;
+        let seg_name: String = row.try_get("corridor_name").map_err(ApiError::from_db)?;
+        if idx == 0 {
+            first_segment_id = seg_id;
+        }
+        append_sync_change(
+            &mut tx,
+            "ROAD_SEGMENT",
+            seg_id,
+            "UPSERT",
+            Some(json!({
+                "segment_id": seg_id,
+                "corridor_name": seg_name,
+                "geometry_source": next_source,
+                "attributes_verified_at": now,
+            })),
+        )
+        .await?;
+    }
+
+    write_audit_log(
+        &mut tx,
+        Some(auth.user_id),
+        "CORRIDOR_ATTRIBUTES_VERIFIED",
+        "ROAD_SEGMENT",
+        first_segment_id,
+        None,
+        json!({
+            "segments_verified": segments_verified,
+            "corridor_name": corridor_name,
+            "region": region,
+            "only_paved": only_paved,
+            "geometry_source": next_source,
+            "verified_at": now,
+            "notes": body.notes,
+        }),
+    )
+    .await?;
+
+    tx.commit().await.map_err(ApiError::from_db)?;
+
+    Ok(Json(VerifyCorridorBatchResponse {
+        segments_verified,
+        corridor_name,
+        region,
+        verified_at: now,
+    }))
 }

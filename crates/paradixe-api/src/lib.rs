@@ -152,9 +152,18 @@ pub fn build_router(state: AppState) -> Router {
         // Sync (2)
         .route("/sync/snapshot", get(sync::get_sync_snapshot))
         .route("/sync/batch", post(sync::post_sync_batch))
-        // Corridors, Regions & IVV
+        // Corridors, Regions, Nodes & IVV
         .route("/corridors/map", get(corridors::get_corridors_map))
         .route("/regions", get(corridors::get_regions))
+        .route("/nodes", get(corridors::list_nodes))
+        .route(
+            "/segments/{segment_id}/attributes",
+            patch(corridors::verify_segment_attributes),
+        )
+        .route(
+            "/corridors/verify-attributes",
+            post(corridors::verify_corridor_batch_attributes),
+        )
         .route("/ivv/recalculate", post(corridors::recalculate_ivv))
         // Telemetry, Field Reports, Webhooks & Incidents (5)
         .route("/telemetry/pings", post(incidents::ingest_telemetry_pings))

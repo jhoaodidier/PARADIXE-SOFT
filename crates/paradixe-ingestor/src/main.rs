@@ -71,7 +71,7 @@ enum Commands {
         region_name: Option<String>,
         #[arg(long)]
         once: bool,
-        #[arg(long, default_value_t = 3)]
+        #[arg(long, default_value_t = 2)]
         interval_hours: u64,
     },
     /// Generate PMTiles v3 vector archive from PostGIS ST_AsMVT and upload to S3 / RustFS
