@@ -1,12 +1,39 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import {
   postFieldReport,
+  postUploadEvidence,
   type CorridorSegmentFeature,
   type ProposedPassability,
 } from "../api/client.ts";
 import { enqueueFieldReport } from "../offline/db.ts";
 import { attachDialogLightDismissFallback, closeTopLayer } from "../utils/topLayer.ts";
-import { IconCrosshair, IconX } from "./Icons.tsx";
+import { IconCamera, IconCrosshair, IconX } from "./Icons.tsx";
+
+async function compressEvidenceImage(file: File): Promise<Blob> {
+  if (typeof createImageBitmap !== "function") {
+    return file;
+  }
+  try {
+    const bitmap = await createImageBitmap(file);
+    const maxDim = 1280;
+    const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.78)
+    );
+    bitmap.close?.();
+    return blob ?? file;
+  } catch {
+    return file;
+  }
+}
 
 export interface FieldReportModalProps {
   open: boolean;
@@ -36,10 +63,27 @@ export function FieldReportModal({
   const [passability, setPassability] = useState<ProposedPassability>("BLOCKED");
   const [latitude, setLatitude] = useState("-9.7120");
   const [longitude, setLongitude] = useState("-76.0910");
+  const [photoBlob, setPhotoBlob] = useState<Blob | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const effectiveSegmentId =
     segmentId || defaultSegmentId || features[0]?.properties.segment_id || "";
+
+  useEffect(() => {
+    return () => {
+      if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    };
+  }, [photoPreviewUrl]);
+
+  async function handlePhotoSelected(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const compressed = await compressEvidenceImage(file);
+    if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    setPhotoBlob(compressed);
+    setPhotoPreviewUrl(typeof URL.createObjectURL === "function" ? URL.createObjectURL(compressed) : null);
+  }
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -91,6 +135,16 @@ export function FieldReportModal({
 
     setSubmitting(true);
     try {
+      let uploadedPhotoUri: string | null = null;
+      if (isOnline && authToken && photoBlob) {
+        try {
+          const uploaded = await postUploadEvidence(photoBlob, authToken);
+          uploadedPhotoUri = uploaded.photo_uri;
+        } catch {
+          uploadedPhotoUri = null;
+        }
+      }
+
       const queued = await enqueueFieldReport({
         segment_id: effectiveSegmentId,
         proposed_passability: passability,
@@ -107,15 +161,22 @@ export function FieldReportModal({
             latitude: queued.latitude,
             longitude: queued.longitude,
             captured_at_client: queued.captured_at_client,
-            photo_uri: null,
+            photo_uri: uploadedPhotoUri,
             channel: "MOBILE_APP",
           },
           authToken
         );
-        onQueuedOrSent("Reporte enviado al sistema de consenso vial.");
+        onQueuedOrSent(
+          uploadedPhotoUri
+            ? "Reporte con evidencia fotográfica enviado al sistema vial."
+            : "Reporte enviado al sistema de consenso vial."
+        );
       } else {
         onQueuedOrSent("Reporte guardado localmente para envío automático al recuperar red.");
       }
+      setPhotoBlob(null);
+      if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+      setPhotoPreviewUrl(null);
       if (dialogRef.current) {
         await closeTopLayer(dialogRef.current);
       }
@@ -258,6 +319,37 @@ export function FieldReportModal({
                 Longitud inválida.
               </span>
             </div>
+          </div>
+
+          <div className="evidence-upload-row">
+            <label className="btn btn--sm evidence-file-label">
+              <IconCamera size={15} />
+              <span>{photoBlob ? "Cambiar foto" : "Adjuntar foto (opcional)"}</span>
+              <input
+                type="file"
+                className="visually-hidden"
+                accept="image/jpeg,image/png,image/webp"
+                capture="environment"
+                onChange={(e) => void handlePhotoSelected(e)}
+              />
+            </label>
+            {photoPreviewUrl && (
+              <div className="evidence-thumb-wrap">
+                <img src={photoPreviewUrl} alt="Vista previa de evidencia vial" className="evidence-thumb" />
+                <button
+                  type="button"
+                  className="icon-btn icon-btn--sm"
+                  aria-label="Quitar fotografía"
+                  onClick={() => {
+                    if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+                    setPhotoBlob(null);
+                    setPhotoPreviewUrl(null);
+                  }}
+                >
+                  <IconX size={14} />
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="modal-actions">

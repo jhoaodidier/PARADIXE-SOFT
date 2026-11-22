@@ -656,3 +656,195 @@ export function postVerifyCorridorAttributes(
     token,
   });
 }
+
+export function postAuthRegister(body: {
+  phone_e164: string;
+  full_name: string;
+  password: string;
+  device_id: string;
+}): Promise<AuthTokenResponse> {
+  return requestJson<AuthTokenResponse>("/auth/register", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export interface EvidenceUploadResponse {
+  object_key: string;
+  photo_uri: string;
+  content_type: string;
+  size_bytes: number;
+}
+
+export async function postUploadEvidence(
+  blob: Blob,
+  token: string
+): Promise<EvidenceUploadResponse> {
+  const response = await fetch(`${getBaseUrl()}/uploads/evidence`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": blob.type || "image/jpeg",
+    },
+    body: blob,
+  });
+  if (!response.ok) {
+    let payload: Partial<ApiError> | undefined;
+    try {
+      payload = (await response.json()) as Partial<ApiError>;
+    } catch {
+      payload = undefined;
+    }
+    throw new ApiClientError(
+      response.status,
+      payload?.error_code ?? `HTTP_${response.status}`,
+      payload?.message ?? `Error subiendo imagen (${response.status})`
+    );
+  }
+  return (await response.json()) as EvidenceUploadResponse;
+}
+
+export interface CreateTransferCorridorInput {
+  side_a_node_id: string;
+  side_b_node_id: string;
+  length_m: number;
+  max_slope_pct: number;
+  transfer_mode: "PEDESTRIAN_SAFE_PATH" | "SHUTTLE_RELAY";
+  max_safe_ivv: number;
+  inspection_valid_days?: number;
+  capabilities: Array<{
+    cargo_type: CargoType;
+    max_payload_kg: number;
+    requires_medical_supervision: boolean;
+    estimated_transfer_time_min: number;
+  }>;
+}
+
+export function postTransferCorridor(
+  body: CreateTransferCorridorInput,
+  token: string
+): Promise<TransferCorridorSummary> {
+  return requestJson<TransferCorridorSummary>("/transfer-corridors", {
+    method: "POST",
+    body: JSON.stringify(body),
+    token,
+  });
+}
+
+export function patchInspectTransferCorridor(
+  corridorId: string,
+  body: { is_verified_safe: boolean; inspection_valid_days?: number; notes?: string },
+  token: string
+): Promise<TransferCorridorSummary> {
+  return requestJson<TransferCorridorSummary>(`/transfer-corridors/${corridorId}/inspect`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+    token,
+  });
+}
+
+export interface CorridorForecastItem {
+  segment_id: string;
+  corridor_name: string;
+  precip_24h_mm: number;
+  precip_72h_mm: number;
+  predicted_ivv_score: number;
+  predicted_risk_level: "GREEN" | "AMBER" | "RED" | "UNKNOWN";
+  generated_at: string;
+}
+
+export interface CorridorForecastResponse {
+  region: string | null;
+  horizon_hours: number;
+  advisory_only: boolean;
+  generated_at: string | null;
+  summary: { green: number; amber: number; red: number };
+  items: CorridorForecastItem[];
+}
+
+export function fetchCorridorForecast(options: {
+  region?: string;
+  horizon_hours: 24 | 48 | 72;
+  limit?: number;
+}): Promise<CorridorForecastResponse> {
+  const params = new URLSearchParams({
+    horizon_hours: String(options.horizon_hours),
+  });
+  if (options.region) params.set("region", options.region);
+  if (typeof options.limit === "number") params.set("limit", String(options.limit));
+  return requestJson<CorridorForecastResponse>(`/corridors/forecast?${params.toString()}`, {
+    method: "GET",
+  });
+}
+
+export interface AnalyticsSummaryResponse {
+  region: string | null;
+  generated_at: string;
+  total_segments: number;
+  certified_segments: number;
+  certified_pct: number;
+  risk_counts: { green: number; amber: number; red: number; unknown: number };
+  active_incidents_total: number;
+  blocked_segments: number;
+  partial_segments: number;
+  active_bridges: number;
+  active_windows: number;
+  verified_transfer_corridors: number;
+  hospitals_count: number;
+  regions_count: number;
+  provinces_count: number;
+  districts_count: number;
+}
+
+export function fetchAnalyticsSummary(region?: string): Promise<AnalyticsSummaryResponse> {
+  const qs = region ? `?region=${encodeURIComponent(region)}` : "";
+  return requestJson<AnalyticsSummaryResponse>(`/analytics/summary${qs}`, {
+    method: "GET",
+  });
+}
+
+export interface AlertSubscriptionItem {
+  subscription_id: string;
+  label: string;
+  region_iso: string | null;
+  corridor_name: string | null;
+  min_risk_level: "AMBER" | "RED" | "BLOCKED";
+  channel: "WHATSAPP_BOT" | "SMS";
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface SubscriptionsListResponse {
+  subscriptions: AlertSubscriptionItem[];
+}
+
+export function fetchSubscriptions(token: string): Promise<SubscriptionsListResponse> {
+  return requestJson<SubscriptionsListResponse>("/subscriptions", {
+    method: "GET",
+    token,
+  });
+}
+
+export function postSubscription(
+  body: {
+    label: string;
+    region_iso?: string | null;
+    corridor_name?: string | null;
+    min_risk_level: "AMBER" | "RED" | "BLOCKED";
+    channel: "WHATSAPP_BOT" | "SMS";
+  },
+  token: string
+): Promise<AlertSubscriptionItem> {
+  return requestJson<AlertSubscriptionItem>("/subscriptions", {
+    method: "POST",
+    body: JSON.stringify(body),
+    token,
+  });
+}
+
+export function deleteSubscription(subscriptionId: string, token: string): Promise<void> {
+  return requestJson<void>(`/subscriptions/${subscriptionId}`, {
+    method: "DELETE",
+    token,
+  });
+}

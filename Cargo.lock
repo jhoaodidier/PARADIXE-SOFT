@@ -1345,6 +1345,7 @@ dependencies = [
  "paradixe-ivv",
  "paradixe-routing",
  "rand 0.8.8",
+ "reqwest",
  "rust_decimal",
  "secrecy",
  "serde",
@@ -1354,6 +1355,7 @@ dependencies = [
  "subtle",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-stream",
  "tower",
  "tower-http",
  "tracing",
@@ -2698,6 +2700,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

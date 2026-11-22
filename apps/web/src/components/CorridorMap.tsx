@@ -8,6 +8,7 @@ import {
   IconCrosshair,
   IconLayers,
   IconList,
+  IconLocate,
   IconMap,
   IconMinus,
   IconMoon,
@@ -55,6 +56,11 @@ export interface CorridorMapProps {
   routeOverlay?: RouteOverlayData | null;
   riskFilter?: string;
   onChangeRiskFilter?: (risk: string) => void;
+  forecastHorizon?: 0 | 24 | 48 | 72;
+  onChangeForecastHorizon?: (horizon: 0 | 24 | 48 | 72) => void;
+  forecastRiskBySegment?: Record<string, "GREEN" | "AMBER" | "RED" | "UNKNOWN">;
+  onLocateOriginCoords?: (lon: number, lat: number) => void;
+  kioskMode?: boolean;
 }
 
 const PASSABILITY_LABELS: Record<
@@ -213,6 +219,11 @@ export function CorridorMap({
   routeOverlay,
   riskFilter: controlledRiskFilter,
   onChangeRiskFilter,
+  forecastHorizon = 0,
+  onChangeForecastHorizon,
+  forecastRiskBySegment,
+  onLocateOriginCoords,
+  kioskMode = false,
 }: CorridorMapProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<maplibregl.Map | null>(null);
@@ -674,16 +685,23 @@ export function CorridorMap({
     const source = map.getSource("corridors-geojson") as maplibregl.GeoJSONSource | undefined;
     if (!source) return;
 
-    const enriched = features.map((f) => ({
-      ...f,
-      properties: {
-        ...f.properties,
-        effective_risk: f.properties.is_stale ? "UNKNOWN" : f.properties.risk_level,
-      },
-    }));
+    const enriched = features.map((f) => {
+      const baseRisk = f.properties.is_stale ? "UNKNOWN" : f.properties.risk_level;
+      const forecastRisk =
+        forecastHorizon > 0 && forecastRiskBySegment
+          ? forecastRiskBySegment[f.properties.segment_id]
+          : undefined;
+      return {
+        ...f,
+        properties: {
+          ...f.properties,
+          effective_risk: forecastRisk ?? baseRisk,
+        },
+      };
+    });
 
     source.setData({ type: "FeatureCollection", features: enriched });
-  }, [features]);
+  }, [features, forecastHorizon, forecastRiskBySegment]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -841,6 +859,19 @@ export function CorridorMap({
     }
   };
 
+  const handleLocateMe = () => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition((pos) => {
+      const { longitude, latitude } = pos.coords;
+      mapInstanceRef.current?.flyTo?.({
+        center: [longitude, latitude],
+        zoom: 12.5,
+        duration: prefersReducedMotion() ? 0 : 500,
+      });
+      onLocateOriginCoords?.(longitude, latitude);
+    });
+  };
+
   const filteredFeatures = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     return features.filter((f) => {
@@ -873,24 +904,45 @@ export function CorridorMap({
     >
       <div ref={mapContainerRef} className="map-canvas-host" />
 
-      {/* Bottom-center compact legend + Table sheet trigger */}
+      {/* Bottom-center compact legend + Predictive timeline + Table sheet trigger */}
       <div className="map-dock-bottom-center">
+        {!kioskMode && onChangeForecastHorizon && (
+          <div className="forecast-pill-bar" role="group" aria-label="Horizonte predictivo IVV">
+            {([0, 24, 48, 72] as const).map((h) => (
+              <button
+                key={h}
+                type="button"
+                className={`forecast-pill-btn${forecastHorizon === h ? " is-active" : ""}`}
+                aria-pressed={forecastHorizon === h}
+                onClick={() => onChangeForecastHorizon(h)}
+              >
+                {h === 0 ? "Ahora" : `+${h}h`}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="map-legend-pill" aria-label="Leyenda del mapa">
           <span className="legend-dot legend-dot--green">Libre</span>
           <span className="legend-dot legend-dot--amber">Precaución</span>
           <span className="legend-dot legend-dot--red">Crítico</span>
           <span className="legend-dot legend-dot--hospital">Hospital</span>
+          {forecastHorizon > 0 && (
+            <span className="legend-forecast-tag">Pronóstico +{forecastHorizon}h</span>
+          )}
         </div>
 
-        <button
-          type="button"
-          className="map-dock-pill"
-          aria-expanded={tableOpen}
-          onClick={() => setTableOpen((v) => !v)}
-        >
-          <IconList size={16} />
-          <span>Vías ({filteredFeatures.length})</span>
-        </button>
+        {!kioskMode && (
+          <button
+            type="button"
+            className="map-dock-pill"
+            aria-expanded={tableOpen}
+            onClick={() => setTableOpen((v) => !v)}
+          >
+            <IconList size={16} />
+            <span>Vías ({filteredFeatures.length})</span>
+          </button>
+        )}
       </div>
 
       {/* Bottom-right Map Controls: Zoom Stack + Capas + Estilo Mapa */}
@@ -938,6 +990,16 @@ export function CorridorMap({
           >
             <IconMinus size={17} />
           </button>
+          {onLocateOriginCoords && (
+            <button
+              type="button"
+              className="zoom-btn"
+              aria-label="Mi ubicación GPS"
+              onClick={handleLocateMe}
+            >
+              <IconLocate size={16} />
+            </button>
+          )}
           <button
             type="button"
             className="zoom-btn"

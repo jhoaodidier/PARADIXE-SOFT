@@ -353,3 +353,82 @@ export function IconShield(props: IconProps) {
     </Svg>
   );
 }
+
+export function IconCamera(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 8.5A2 2 0 0 1 6 6.5h2.2l1.3-2h5l1.3 2H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-9Z" />
+      <circle cx="12" cy="13" r="3.2" />
+    </Svg>
+  );
+}
+
+export function IconDownload(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 3.5v11.5" />
+      <path d="m7.5 11.5 4.5 4.5 4.5-4.5" />
+      <path d="M4 19.5h16" />
+    </Svg>
+  );
+}
+
+export function IconShare(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="18" cy="5.5" r="2.5" />
+      <circle cx="6" cy="12" r="2.5" />
+      <circle cx="18" cy="18.5" r="2.5" />
+      <path d="m8.2 10.9 7.6-4.3" />
+      <path d="m8.2 13.1 7.6 4.3" />
+    </Svg>
+  );
+}
+
+export function IconBell(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M6.5 9.5a5.5 5.5 0 0 1 11 0c0 5 2 6.5 2 6.5h-15s2-1.5 2-6.5Z" />
+      <path d="M10.3 19.5a2 2 0 0 0 3.4 0" />
+    </Svg>
+  );
+}
+
+export function IconTv(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="3" y="4.5" width="18" height="12.5" rx="2" />
+      <path d="M8.5 20.5h7" />
+      <path d="M12 17v3.5" />
+    </Svg>
+  );
+}
+
+export function IconFileText(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5L14 3.5Z" />
+      <path d="M14 3.5v5h5" />
+      <path d="M9 13h6" />
+      <path d="M9 16.5h4" />
+    </Svg>
+  );
+}
+
+export function IconLocate(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <polygon points="3 11.5 21 3 12.5 21 10.5 13.5 3 11.5" />
+    </Svg>
+  );
+}
+
+export function IconTrash(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4.5 6.5h15" />
+      <path d="M9.5 6.5V4h5v2.5" />
+      <path d="m6.5 6.5.8 12.5a1.5 1.5 0 0 0 1.5 1.4h6.4a1.5 1.5 0 0 0 1.5-1.4l.8-12.5" />
+    </Svg>
+  );
+}

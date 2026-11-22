@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
+  fetchAnalyticsSummary,
   fetchAuthMe,
   fetchBridgesOperations,
+  fetchCorridorForecast,
   fetchCorridorsMap,
   fetchIncidents,
   fetchNodes,
@@ -14,6 +16,7 @@ import {
   postAuthRefresh,
   postSyncBatch,
   postVerifyCorridorAttributes,
+  type AnalyticsSummaryResponse,
   type AuthMeResponse,
   type AuthTokenResponse,
   type BridgesOperationsResponse,
@@ -45,6 +48,7 @@ import {
   IconRoute,
   IconSearch,
   IconSettings,
+  IconShare,
   IconSparkles,
   IconSun,
   IconUser,
@@ -188,6 +192,14 @@ export function App({ initialFeatures }: AppProps) {
   const [quickOriginNodeId, setQuickOriginNodeId] = useState<string | null>(null);
   const [quickDestNodeId, setQuickDestNodeId] = useState<string | null>(null);
   const [certifyingSegment, setCertifyingSegment] = useState(false);
+
+  const [forecastHorizon, setForecastHorizon] = useState<0 | 24 | 48 | 72>(0);
+  const [forecastRiskBySegment, setForecastRiskBySegment] = useState<
+    Record<string, "GREEN" | "AMBER" | "RED" | "UNKNOWN">
+  >({});
+  const [sseLive, setSseLive] = useState(false);
+  const [kioskMode, setKioskMode] = useState(false);
+  const [kioskAnalytics, setKioskAnalytics] = useState<AnalyticsSummaryResponse | null>(null);
 
   const mountedRef = useRef(true);
 
@@ -434,6 +446,107 @@ export function App({ initialFeatures }: AppProps) {
     };
   }, [refreshLocalState, syncWithServer]);
 
+  useEffect(() => {
+    if (!isOnline || initialFeatures || typeof EventSource === "undefined") {
+      setSseLive(false);
+      return;
+    }
+    const configured = import.meta.env?.VITE_API_BASE_URL;
+    const base =
+      typeof configured === "string" && configured.length > 0
+        ? configured.replace(/\/+$/, "")
+        : "/api/v1";
+    const es = new EventSource(`${base}/events/stream`);
+    const onUpdate = () => {
+      setSseLive(true);
+      void syncWithServer();
+    };
+    es.addEventListener("connected", () => setSseLive(true));
+    es.addEventListener("INCIDENT_UPDATED", onUpdate);
+    es.addEventListener("BRIDGE_UPDATED", onUpdate);
+    es.addEventListener("SEGMENT_VERIFIED", onUpdate);
+    es.onerror = () => setSseLive(false);
+    return () => {
+      es.close();
+    };
+  }, [isOnline, initialFeatures, syncWithServer]);
+
+  useEffect(() => {
+    if (forecastHorizon === 0 || !isOnline) {
+      setForecastRiskBySegment({});
+      return;
+    }
+    let cancelled = false;
+    void fetchCorridorForecast({
+      region: selectedRegionCode,
+      horizon_hours: forecastHorizon,
+      limit: 2500,
+    })
+      .then((res) => {
+        if (cancelled) return;
+        const map: Record<string, "GREEN" | "AMBER" | "RED" | "UNKNOWN"> = {};
+        for (const item of res.items) {
+          map[item.segment_id] = item.predicted_risk_level;
+        }
+        setForecastRiskBySegment(map);
+      })
+      .catch(() => {
+        if (!cancelled) setForecastRiskBySegment({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [forecastHorizon, selectedRegionCode, isOnline]);
+
+  useEffect(() => {
+    if (!kioskMode || !isOnline) return;
+    let cancelled = false;
+    void fetchAnalyticsSummary(selectedRegionCode)
+      .then((res) => {
+        if (!cancelled) setKioskAnalytics(res);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [kioskMode, selectedRegionCode, isOnline]);
+
+  const handleLocateOriginCoords = useCallback(
+    (lon: number, lat: number) => {
+      let bestNodeId: string | null = null;
+      let bestLabel = "tu posición actual";
+      let bestDist2 = Infinity;
+
+      for (const n of roadNodes) {
+        const d2 = (n.lon - lon) ** 2 + (n.lat - lat) ** 2;
+        if (d2 < bestDist2) {
+          bestDist2 = d2;
+          bestNodeId = n.node_id;
+          bestLabel = n.name;
+        }
+      }
+      if (!bestNodeId) {
+        for (const f of features) {
+          const first = f.geometry.coordinates[0];
+          if (!first) continue;
+          const d2 = (first[0] - lon) ** 2 + (first[1] - lat) ** 2;
+          if (d2 < bestDist2) {
+            bestDist2 = d2;
+            bestNodeId = f.properties.origin_node_id;
+            bestLabel = f.properties.corridor_name;
+          }
+        }
+      }
+      if (bestNodeId) {
+        setQuickOriginNodeId(bestNodeId);
+        setActiveTabId("routing");
+        setDrawerOpen(true);
+        pushToast(`Origen fijado cerca de ${bestLabel}.`);
+      }
+    },
+    [roadNodes, features, pushToast]
+  );
+
   const handleThemeChange = (pref: ThemePreference) => {
     applyThemePreference(pref);
     setThemePreference(pref);
@@ -624,6 +737,7 @@ export function App({ initialFeatures }: AppProps) {
         <BridgesPanel
           operations={bridgesOperations}
           incidents={incidents}
+          nodes={roadNodes}
           isOnline={isOnline}
           authToken={authToken}
           userRole={currentUser?.role_code ?? null}
@@ -679,6 +793,11 @@ export function App({ initialFeatures }: AppProps) {
           resolvedScheme={resolvedScheme}
           regionLabel={activeRegionLabel}
           routeOverlay={routeOverlay}
+          forecastHorizon={forecastHorizon}
+          onChangeForecastHorizon={setForecastHorizon}
+          forecastRiskBySegment={forecastRiskBySegment}
+          onLocateOriginCoords={handleLocateOriginCoords}
+          kioskMode={kioskMode}
         />
       </main>
 
@@ -691,7 +810,7 @@ export function App({ initialFeatures }: AppProps) {
             <span
               className={`conn-pill ${isOnline ? "conn-pill--online" : "conn-pill--offline"}`}
             >
-              {isOnline ? "En vivo" : "Offline"}
+              {isOnline ? (sseLive ? "En vivo · SSE" : "En vivo") : "Offline"}
             </span>
           </div>
         </div>
@@ -860,29 +979,84 @@ export function App({ initialFeatures }: AppProps) {
         )}
       </div>
 
-      {/* Collapsible Floating Left Spatial Drawer */}
-      <aside
-        className={`floating-drawer${drawerOpen ? "" : " is-collapsed"}`}
-        aria-label="Panel de navegación y rutas"
-      >
-        <div className="drawer-surface">
-          <OperationalTabs
-            tabs={operationalTabs}
-            activeTabId={activeTabId}
-            onChangeTab={setActiveTabId}
-          />
-        </div>
-
-        <button
-          type="button"
-          className="drawer-collapse-handle"
-          aria-expanded={drawerOpen}
-          aria-label={drawerOpen ? "Contraer panel lateral" : "Abrir panel lateral"}
-          onClick={() => setDrawerOpen((v) => !v)}
+      {/* Kiosk Sala COER HUD vs Standard Collapsible Floating Left Spatial Drawer */}
+      {kioskMode ? (
+        <aside className="kiosk-hud-card" aria-label="Sala Situacional COER">
+          <div className="panel-heading-row">
+            <div>
+              <span className="section-eyebrow">Sala Situacional COER</span>
+              <h2 className="panel-title">{activeRegionLabel}</h2>
+            </div>
+            <button
+              type="button"
+              className="btn btn--sm"
+              onClick={() => setKioskMode(false)}
+            >
+              Salir sala COER
+            </button>
+          </div>
+          {kioskAnalytics && (
+            <div className="kpi-mini-grid">
+              <div className="stat-mini">
+                <strong>{kioskAnalytics.total_segments.toLocaleString("es-PE")}</strong>
+                <span>Tramos</span>
+              </div>
+              <div className="stat-mini">
+                <strong>{kioskAnalytics.risk_counts.green}</strong>
+                <span>Libres</span>
+              </div>
+              <div className="stat-mini">
+                <strong>{kioskAnalytics.risk_counts.amber + kioskAnalytics.risk_counts.red}</strong>
+                <span>Riesgo</span>
+              </div>
+              <div className="stat-mini">
+                <strong>{kioskAnalytics.hospitals_count}</strong>
+                <span>Hospitales</span>
+              </div>
+            </div>
+          )}
+          <div className="group-block">
+            <span className="section-eyebrow">Alertas activas ({activeIncidentCount})</span>
+            {incidents.length === 0 ? (
+              <p className="panel-subtitle">Red troncal sin interrupciones reportadas.</p>
+            ) : (
+              <ul className="ops-card-list">
+                {incidents.slice(0, 4).map((i) => (
+                  <li key={i.incident_id} className="ops-list-item">
+                    <strong>{i.corridor_name}</strong>
+                    <div className="hint" style={{ margin: 0 }}>
+                      {i.verification_state} · {i.impact_passability}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </aside>
+      ) : (
+        <aside
+          className={`floating-drawer${drawerOpen ? "" : " is-collapsed"}`}
+          aria-label="Panel de navegación y rutas"
         >
-          {drawerOpen ? <IconChevronLeft size={16} /> : <IconChevronRight size={16} />}
-        </button>
-      </aside>
+          <div className="drawer-surface">
+            <OperationalTabs
+              tabs={operationalTabs}
+              activeTabId={activeTabId}
+              onChangeTab={setActiveTabId}
+            />
+          </div>
+
+          <button
+            type="button"
+            className="drawer-collapse-handle"
+            aria-expanded={drawerOpen}
+            aria-label={drawerOpen ? "Contraer panel lateral" : "Abrir panel lateral"}
+            onClick={() => setDrawerOpen((v) => !v)}
+          >
+            {drawerOpen ? <IconChevronLeft size={16} /> : <IconChevronRight size={16} />}
+          </button>
+        </aside>
+      )}
 
       {/* Floating Contextual Inspector on right when segment is active */}
       {selectedFeature && inspectorOpen && (
@@ -968,6 +1142,20 @@ export function App({ initialFeatures }: AppProps) {
             >
               Reportar
             </button>
+          </div>
+
+          <div className="ops-actions-row" style={{ marginBlockStart: "0.45rem" }}>
+            <a
+              className="btn btn--sm"
+              href={`https://wa.me/?text=${encodeURIComponent(
+                `PARADIXE SOFT · ${selectedFeature.properties.corridor_name} (${PASSABILITY_HUMAN[selectedFeature.properties.passability_state]}, IVV ${selectedFeature.properties.ivv_score?.toFixed(0) ?? "N/A"}).`
+              )}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <IconShare size={14} />
+              <span>Compartir</span>
+            </a>
           </div>
 
           {authToken &&
@@ -1077,6 +1265,14 @@ export function App({ initialFeatures }: AppProps) {
         syncMeta={syncMeta}
         queuedCount={queuedReports.length}
         ephemeralRecord={ephemeralRecord}
+        authToken={authToken}
+        isOnline={isOnline}
+        regions={territorialUnits}
+        selectedRegionCode={selectedRegionCode}
+        features={features}
+        kioskMode={kioskMode}
+        onToggleKioskMode={setKioskMode}
+        onToast={pushToast}
       />
 
       <AuthModal

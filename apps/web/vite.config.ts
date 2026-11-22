@@ -2,27 +2,40 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 
+const apiProxyTarget =
+  process.env.VITE_API_PROXY_TARGET ?? "http://127.0.0.1:8080";
+
 export default defineConfig({
   build: {
     target: "esnext",
   },
   server: {
     proxy: {
-      "/api": "http://127.0.0.1:8080",
+      "/api": apiProxyTarget,
       "/tiles": {
         target: "http://127.0.0.1:9000",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/tiles/, "/paradixe-tiles"),
       },
+      "/evidence": {
+        target: "http://127.0.0.1:9000",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/evidence/, "/paradixe-evidence"),
+      },
     },
   },
   preview: {
     proxy: {
-      "/api": "http://127.0.0.1:8080",
+      "/api": apiProxyTarget,
       "/tiles": {
         target: "http://127.0.0.1:9000",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/tiles/, "/paradixe-tiles"),
+      },
+      "/evidence": {
+        target: "http://127.0.0.1:9000",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/evidence/, "/paradixe-evidence"),
       },
     },
   },

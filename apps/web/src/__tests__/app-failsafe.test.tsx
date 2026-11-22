@@ -541,6 +541,52 @@ describe("UI Comercial, Fail-Safe y Accesibilidad PARADIXE SOFT", () => {
           { status: 200, headers: { "Content-Type": "application/json" } }
         );
       }
+      if (url.includes("/corridors/forecast")) {
+        return new Response(
+          JSON.stringify({
+            region: "PE-HUC",
+            horizon_hours: 24,
+            advisory_only: true,
+            generated_at: "2026-11-22T19:57:00Z",
+            summary: { green: 0, amber: 1, red: 0 },
+            items: [
+              {
+                segment_id: "33333333-3333-4333-8333-333333333333",
+                corridor_name: "Huánuco – Túnel Carpish",
+                precip_24h_mm: 42.5,
+                precip_72h_mm: 110.0,
+                predicted_ivv_score: 58.5,
+                predicted_risk_level: "AMBER",
+                generated_at: "2026-11-22T19:57:00Z",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (url.includes("/analytics/summary")) {
+        return new Response(
+          JSON.stringify({
+            region: "PE-HUC",
+            generated_at: "2026-11-22T19:57:00Z",
+            total_segments: 10703,
+            certified_segments: 1369,
+            certified_pct: 12.8,
+            risk_counts: { green: 10480, amber: 220, red: 3, unknown: 0 },
+            active_incidents_total: 0,
+            blocked_segments: 0,
+            partial_segments: 0,
+            active_bridges: 0,
+            active_windows: 0,
+            verified_transfer_corridors: 0,
+            hospitals_count: 217,
+            regions_count: 4,
+            provinces_count: 27,
+            districts_count: 424,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
       return null;
     });
 
@@ -567,5 +613,72 @@ describe("UI Comercial, Fail-Safe y Accesibilidad PARADIXE SOFT", () => {
         )
       ).toBe(true);
     });
+  });
+
+  it("consulta pronostico IVV predictivo +24h y abre centro de control con KPIs", async () => {
+    const fetchSpy = createDefaultFetchMock((url) => {
+      if (url.includes("/corridors/forecast")) {
+        return new Response(
+          JSON.stringify({
+            region: "PE-HUC",
+            horizon_hours: 24,
+            advisory_only: true,
+            generated_at: "2026-11-22T19:57:00Z",
+            summary: { green: 0, amber: 1, red: 0 },
+            items: [
+              {
+                segment_id: "33333333-3333-4333-8333-333333333333",
+                corridor_name: "Huánuco – Túnel Carpish",
+                precip_24h_mm: 42.5,
+                precip_72h_mm: 110.0,
+                predicted_ivv_score: 58.5,
+                predicted_risk_level: "AMBER",
+                generated_at: "2026-11-22T19:57:00Z",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (url.includes("/analytics/summary")) {
+        return new Response(
+          JSON.stringify({
+            region: "PE-HUC",
+            generated_at: "2026-11-22T19:57:00Z",
+            total_segments: 10703,
+            certified_segments: 1369,
+            certified_pct: 12.8,
+            risk_counts: { green: 10480, amber: 220, red: 3, unknown: 0 },
+            active_incidents_total: 0,
+            blocked_segments: 0,
+            partial_segments: 0,
+            active_bridges: 0,
+            active_windows: 0,
+            verified_transfer_corridors: 0,
+            hospitals_count: 217,
+            regions_count: 4,
+            provinces_count: 27,
+            districts_count: 424,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return null;
+    });
+
+    render(<App initialFeatures={SAMPLE_FEATURES} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "+24h" }));
+    await waitFor(() => {
+      expect(screen.getByText("Pronóstico +24h")).toBeInTheDocument();
+      expect(
+        fetchSpy.mock.calls.some(([u]) => String(u).includes("/corridors/forecast?horizon_hours=24"))
+      ).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Configuración" }));
+    expect(await screen.findByText(/Centro de Control y Ajustes/)).toBeInTheDocument();
+    expect(await screen.findByText("12.8%")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Exportar CSV" })).toBeInTheDocument();
   });
 });

@@ -2036,3 +2036,149 @@ dialog.modal-dialog::backdrop {
     outline: 2px solid Highlight;
   }
 }
+
+/* ============================================================================
+   Forecast Pill Bar, GPS/WhatsApp, Photos, Offline Packs & Kiosk Room
+   ============================================================================ */
+.forecast-pill-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.22rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-subtle);
+  background-color: var(--surface-glass);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--shadow-float);
+}
+
+.forecast-pill-btn {
+  min-block-size: 32px;
+  min-inline-size: auto;
+  padding: 0.25rem 0.65rem;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.forecast-pill-btn.is-active {
+  background-color: var(--brand);
+  color: var(--brand-text);
+  box-shadow: 0 2px 6px color-mix(in oklab, var(--brand) 28%, transparent);
+}
+
+.legend-forecast-tag {
+  padding: 0.12rem 0.5rem;
+  border-radius: var(--radius-pill);
+  background-color: color-mix(in oklab, var(--brand) 14%, transparent);
+  color: var(--brand);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.econ-impact-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.75rem;
+  margin-block-start: 0.6rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--radius-md);
+  background-color: var(--surface-well);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.77rem;
+  color: var(--text-muted);
+}
+
+.econ-savings-highlight {
+  color: var(--status-green);
+}
+
+.evidence-upload-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  margin-block: 0.6rem 0.25rem;
+}
+
+.evidence-thumb-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.evidence-thumb {
+  inline-size: 46px;
+  block-size: 46px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+}
+
+dialog.modal-dialog--wide {
+  inline-size: min(94dvw, 620px);
+}
+
+.offline-pack-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.offline-pack-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background-color: var(--surface-well);
+}
+
+.offline-pack-row strong {
+  display: block;
+  font-size: 0.84rem;
+}
+
+.offline-pack-row small {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+}
+
+.kpi-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.kiosk-hud-card {
+  position: fixed;
+  inset-block-start: 5.1rem;
+  inset-inline-start: 1rem;
+  z-index: 25;
+  inline-size: min(360px, calc(100dvw - 2rem));
+  padding: 1rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  background-color: var(--surface-glass);
+  backdrop-filter: blur(20px);
+  box-shadow: var(--shadow-float);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+@media print {
+  .floating-topbar,
+  .floating-drawer,
+  .map-dock-bottom-center,
+  .map-dock-bottom-right,
+  .floating-status-strip,
+  .toast-region {
+    display: none !important;
+  }
+}

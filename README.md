@@ -131,13 +131,14 @@ Salida determinista esperada: `"ivv_score": "84.00"`, `"risk_level": "RED"`.
 
 | Ruta | Descripción |
 | :--- | :--- |
-| [`crates/`](./crates) | Cargo Workspace en Rust (`paradixe-domain`, `paradixe-ivv`, `paradixe-consensus`, `paradixe-routing`, `paradixe-impact`, `paradixe-api`, `paradixe-ingestor`) |
-| [`apps/web/`](./apps/web) | PWA Offline-First en React + TypeScript + MapLibre GL JS + PMTiles + IndexedDB |
-| [`openapi/openapi-v1.json`](./openapi/openapi-v1.json) | Contrato OpenAPI 3.1.0 canónico (`/api/v1`, 22 rutas y esquemas discriminados) |
-| [`migrations/0001_initial_schema.sql`](./migrations/0001_initial_schema.sql) | Esquema PostgreSQL 16 + PostGIS 3.4 (27 tablas 3NF, índices `GiST ::geography`, `CHECK`s) |
-| [`migrations/0002_seed_base_catalogs.sql`](./migrations/0002_seed_base_catalogs.sql) | Semillas idempotentes (`sync_control`, roles RBAC, categorías vehiculares, versiones base) |
-| [`migrations/0003_territorial_regions_and_osm_lineage.sql`](./migrations/0003_territorial_regions_and_osm_lineage.sql) | Unidades territoriales (`territorial_units`), hidrografía (`hydrography_waterways`) y trazabilidad OSM |
+| [`crates/`](./crates) | Cargo Workspace en Rust (`paradixe-domain`, `paradixe-ivv`, `paradixe-consensus`, `paradixe-routing`, `paradixe-impact`, `paradixe-api`, `paradixe-ingestor`, `paradixe-messaging`) |
+| [`apps/web/`](./apps/web) | PWA Offline-First en React + TypeScript + MapLibre GL JS + PMTiles + IndexedDB + SSE |
+| [`openapi/openapi-v1.json`](./openapi/openapi-v1.json) | Contrato OpenAPI 3.1.0 canónico (`/api/v1`, 40 rutas y esquemas discriminados) |
+| [`migrations/`](./migrations) | Esquema PostgreSQL 16 + PostGIS 3.4 (`0001`..`0005`: 3NF, `territorial_units`, pronósticos IVV +72h y suscripciones de flota) |
+| [`infra/`](./infra) | Nginx reverse proxy HTTP/2 + SSE y configuración de despliegue productivo |
 | [`docker-compose.yml`](./docker-compose.yml) | Orquestación local de PostGIS 16 y RustFS S3 en Rust (puerto 9000 / consola 9001) |
+| [`docker-compose.prod.yml`](./docker-compose.prod.yml) | Stack productivo completo (`postgres`, `rustfs`, `api`, `messaging`, `weather-worker`, `web`) |
+| [`scripts/`](./scripts) | Bootstrap DB, semillas, daemon meteorológico y validación integral (`verify_full_e2e.sh`) |
 | [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) | Pipeline CI en GitHub Actions (Rust fmt/clippy/test, PWA Vite/Vitest y migraciones PostGIS) |
 | [`docs/PARADIXE_SOFT.md`](./docs/PARADIXE_SOFT.md) | Especificación técnica ejecutable completa (`2.0.0-prod-sdd-rust`) |
 | [`.github/PULL_REQUEST_TEMPLATE.md`](./.github/PULL_REQUEST_TEMPLATE.md) | Checklist SDD, PostGIS `::geography`, privacidad y pruebas para Pull Requests |
@@ -185,43 +186,58 @@ cargo test -p paradixe-api --test integration_postgis -- --ignored --test-thread
 
 ### 5. Ingesta Territorial Multi-Región (OSM, NASA SRTM 30m, Open-Meteo IVV y PMTiles v3)
 ```bash
-# Ingesta completa de Huánuco (`PE-HUC`, 11 provincias y distritos) y publicación en RustFS
+# Ingesta completa de Huánuco (`PE-HUC`), Pasco (`PE-PAS`), Junín (`PE-JUN`) y Ucayali (`PE-UCA`)
+# Cobertura Macro-Región Centro: 27 provincias, 424 distritos y PMTiles v3 en RustFS
 cargo run --release -p paradixe-ingestor -- sync-all --region PE-HUC --download
+cargo run --release -p paradixe-ingestor -- sync-all --region PE-PAS --download
+cargo run --release -p paradixe-ingestor -- sync-all --region PE-JUN --download
+cargo run --release -p paradixe-ingestor -- sync-all --region PE-UCA --download
 
-# Escalamiento a otros departamentos (`PE-PAS`, `PE-JUN`, `PE-UCA`, `PE-SAM`, `PE-ANC`, `PE-ALL`) o bounding box arbitrario
-cargo run --release -p paradixe-ingestor -- sync-all --region PE-PAS
-cargo run --release -p paradixe-ingestor -- sync-all --region PE-CUSTOM --bbox "-77.2,-10.4,-74.5,-8.2" --region-name "Macro-Región Centro"
+# Sincronización de puntos críticos geotécnicos y pronóstico determinista +24h/+48h/+72h
+cargo run --release -p paradixe-ingestor -- hotspots-sync
+cargo run --release -p paradixe-ingestor -- forecast-sync
 
 # Refresco periódico de lluvia 24h/72h e IVV determinista cada 2 horas
 ./scripts/run_weather_daemon.sh PE-HUC 2
 ```
 
-### 6. Consola Web en Vivo y Pasarela WhatsApp/SMS (API + RustFS PMTiles + PWA)
+### 6. Consola Web en Vivo, Tiempo Real (SSE), Evidencias S3 y Pasarela WhatsApp/SMS
 ```bash
 # 1. Crear usuarios operadores locales (COER_ADMIN, CIVIL_DEFENSE, HEALTH_OPERATOR)
 cargo run -p paradixe-api --bin seed_dev_users
 
-# 2. Levantar API Core en http://127.0.0.1:8080
+# 2. Levantar API Core en http://127.0.0.1:8080 (incluye SSE /api/v1/events/stream, S3 y /metrics)
 cargo run -p paradixe-api --bin paradixe-api
 
 # 3. Levantar pasarela WhatsApp Cloud API + SMS en http://127.0.0.1:8090
 cargo run -p paradixe-messaging -- serve
 
-# 4. Levantar PWA con proxy hacia /api y /tiles (http://localhost:5173)
+# 4. Levantar PWA con proxy hacia /api, /tiles y /evidence (http://localhost:5173)
 cd apps/web && npm install && npm run dev
+
+# 5. Verificación End-to-End completa sobre PostGIS, RustFS, API y Mensajería
+./scripts/verify_full_e2e.sh
 ```
+
+### 7. Despliegue Productivo con Docker Compose
+```bash
+# Stack completo: PostGIS 16 + RustFS S3 + paradixe-api + paradixe-messaging + weather-worker + Nginx PWA
+docker compose -f docker-compose.prod.yml config -q
+docker compose -f docker-compose.prod.yml up -d --build
+```
+Incluye streaming en tiempo real vía Server-Sent Events (`/api/v1/events/stream`), evidencias fotográficas presignadas/proxy en RustFS (`/api/v1/uploads/{presign,evidence}`), suscripciones de alertas para flotas WhatsApp/SMS (`/api/v1/subscriptions`), exportación analítica COER y métricas Prometheus (`/metrics`).
 
 ---
 
 ## Hoja de Ruta de Producción
 
-- [x] **Etapa 0 — Arquitectura SDD y Base de Datos:** Especificación `2.0.0-prod-sdd-rust`, esquema PostgreSQL 16 + PostGIS 3.4 (27 tablas 3NF), semillas base e infraestructura Docker (PostGIS + RustFS).
-- [x] **Etapa 1A — Contrato OpenAPI 3.1 y Motores CLI en Rust:** `openapi-v1.json`, Cargo Workspace con `#![forbid(unsafe_code)]`, precisión `MidpointAwayFromZero` y suite de pruebas unitarias SDD.
-- [x] **Etapa 1B — PWA Offline-First (`apps/web`):** MapLibre GL JS + PMTiles, IndexedDB atómica (`sync_control` + `outbox_queue`), rotación diaria de ID GPS, validación accesible y CI en GitHub Actions.
-- [x] **Etapa 2A — API Core (`paradixe-api`):** Servidor Axum/SQLx (`/api/v1`), roles RBAC, certificación física auditada, rol `paradixe_sim_ro` de solo lectura operativa, `sync_control` transaccional y suite de integración sobre PostgreSQL 16 + PostGIS 3.4 real.
-- [x] **Etapa 2B — Ingestor Real Multi-Región (`paradixe-ingestor`):** Worker escalable de ingesta OSM Geofabrik + NASA SRTM 30m + clima `OPEN_METEO` + generación y publicación de archivos `PMTiles v3` regionales sobre RustFS/S3 (activo sobre todo Huánuco `PE-HUC`).
-- [x] **Etapa 3 — Mensajería Multicanal (`paradixe-messaging`):** Adaptadores de producción para WhatsApp Cloud API y fallback SMS con parser ciudadano en español y firmas HMAC constantes.
-- [ ] **Etapa 4 — Piloto Operativo B2B/B2G:** Despliegue controlado en Huánuco–Carpish–Tingo María con operadores logísticos, gremios agrícolas, COER y redes de salud.
+- [x] **Etapa 0 — Arquitectura SDD y Base de Datos:** Especificación `2.0.0-prod-sdd-rust`, esquema PostgreSQL 16 + PostGIS 3.4 (27 tablas 3NF + migraciones `0003`..`0005`), semillas base e infraestructura Docker (PostGIS + RustFS).
+- [x] **Etapa 1A — Contrato OpenAPI 3.1 y Motores CLI en Rust:** `openapi-v1.json` (40 rutas), Cargo Workspace con `#![forbid(unsafe_code)]`, precisión `MidpointAwayFromZero` y suite de pruebas unitarias SDD.
+- [x] **Etapa 1B — PWA Offline-First (`apps/web`):** MapLibre GL JS + PMTiles v3, paquetes regionales descargables en IndexedDB (`sync_control` + `outbox_queue`), captura fotográfica comprimida, GPS/WhatsApp UX y modo Sala COER / impresión.
+- [x] **Etapa 2A — API Core (`paradixe-api`):** Servidor Axum/SQLx (`/api/v1`), podado espacial de ruteo, impacto económico, roles RBAC, registro de conductores, pasos de transbordo, SSE en vivo, S3 RustFS y métricas Prometheus (`/metrics`).
+- [x] **Etapa 2B — Ingestor Real Multi-Región (`paradixe-ingestor`):** Worker escalable OSM Geofabrik + NASA SRTM 30m + puntos críticos geotécnicos (`hotspots-sync`) + pronóstico IVV `+24/+48/+72h` (`forecast-sync`) + `PMTiles v3` sobre la Macro-Región Centro (`PE-HUC`, `PE-PAS`, `PE-JUN`, `PE-UCA`).
+- [x] **Etapa 3 — Mensajería Multicanal (`paradixe-messaging`):** Adaptadores de producción WhatsApp Cloud API y fallback SMS con parser ciudadano en español, despacho automático por suscripciones y firmas HMAC constantes.
+- [x] **Etapa 4 — Plataforma Productiva B2B/B2G Lista para Piloto Macro-Regional:** Cobertura validada en 4 departamentos (27 provincias, 424 distritos), suite E2E viva (`verify_full_e2e.sh`) y despliegue productivo Docker Compose + Nginx.
 
 ---
 

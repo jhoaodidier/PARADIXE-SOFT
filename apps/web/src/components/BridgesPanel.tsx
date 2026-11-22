@@ -2,11 +2,14 @@ import { useId, useState, type FormEvent } from "react";
 import {
   ApiClientError,
   patchBridgeStatus,
+  patchInspectTransferCorridor,
   postHumanitarianWindow,
   postProposeBridge,
+  postTransferCorridor,
   type BridgesOperationsResponse,
   type CargoType,
   type IncidentListItem,
+  type RoadNodeItem,
   type RoleCode,
 } from "../api/client.ts";
 import { IconBridge } from "./Icons.tsx";
@@ -14,6 +17,7 @@ import { IconBridge } from "./Icons.tsx";
 export interface BridgesPanelProps {
   operations: BridgesOperationsResponse | null;
   incidents: IncidentListItem[];
+  nodes?: RoadNodeItem[];
   isOnline: boolean;
   authToken: string | null;
   userRole: RoleCode | null;
@@ -48,6 +52,7 @@ const DIRECTION_LABELS = {
 export function BridgesPanel({
   operations,
   incidents,
+  nodes = [],
   isOnline,
   authToken,
   userRole,
@@ -65,6 +70,13 @@ export function BridgesPanel({
     "ORIGIN_TO_DEST"
   );
   const [durationMin, setDurationMin] = useState("90");
+  const [sideANodeId, setSideANodeId] = useState("");
+  const [sideBNodeId, setSideBNodeId] = useState("");
+  const [tcMode, setTcMode] = useState<"PEDESTRIAN_SAFE_PATH" | "SHUTTLE_RELAY">(
+    "PEDESTRIAN_SAFE_PATH"
+  );
+  const [tcLengthM, setTcLengthM] = useState("180");
+  const [tcMaxSlopePct, setTcMaxSlopePct] = useState("12");
   const [busy, setBusy] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -90,6 +102,79 @@ export function BridgesPanel({
   const effCorridor = corridorId || transferCorridors[0]?.corridor_id || "";
   const effWinIncident = winIncidentId || confirmedPartialIncidents[0]?.incident_id || "";
   const effVehicleCat = vehicleCategoryId || vehicles[0]?.category_id || "";
+  const effSideA = sideANodeId || nodes[0]?.node_id || "";
+  const effSideB = sideBNodeId || nodes[Math.min(1, Math.max(0, nodes.length - 1))]?.node_id || "";
+
+  async function handleInspectCorridor(targetId: string) {
+    if (!authToken) return;
+    setErrorMsg(null);
+    setBusy(true);
+    try {
+      await patchInspectTransferCorridor(
+        targetId,
+        { is_verified_safe: true, inspection_valid_days: 30, notes: "Inspeccion vigente" },
+        authToken
+      );
+      await onRefreshOperations();
+      onToast("Inspección del paso de transbordo revalidada.");
+    } catch (err) {
+      if (err instanceof ApiClientError) {
+        setErrorMsg(`${err.errorCode}: ${err.message}`);
+      } else {
+        setErrorMsg("No fue posible revalidar el paso.");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCreateTransferCorridor(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!authToken || !effSideA || !effSideB || effSideA === effSideB) {
+      setErrorMsg("Selecciona dos nodos distintos para el paso de transbordo.");
+      return;
+    }
+    setErrorMsg(null);
+    setBusy(true);
+    try {
+      await postTransferCorridor(
+        {
+          side_a_node_id: effSideA,
+          side_b_node_id: effSideB,
+          length_m: Math.max(10, Number(tcLengthM) || 180),
+          max_slope_pct: Math.max(0, Number(tcMaxSlopePct) || 12),
+          transfer_mode: tcMode,
+          max_safe_ivv: 69,
+          inspection_valid_days: 30,
+          capabilities: [
+            {
+              cargo_type: "MEDICAL_SUPPLIES",
+              max_payload_kg: 1500,
+              requires_medical_supervision: false,
+              estimated_transfer_time_min: 20,
+            },
+            {
+              cargo_type: "PERISHABLE_AGRI",
+              max_payload_kg: 3000,
+              requires_medical_supervision: false,
+              estimated_transfer_time_min: 35,
+            },
+          ],
+        },
+        authToken
+      );
+      await onRefreshOperations();
+      onToast("Paso de transbordo certificado.");
+    } catch (err) {
+      if (err instanceof ApiClientError) {
+        setErrorMsg(`${err.errorCode}: ${err.message}`);
+      } else {
+        setErrorMsg("No fue posible registrar el paso de transbordo.");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function handleProposeBridge(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -306,6 +391,18 @@ export function BridgesPanel({
                         {c.is_verified_safe ? "Habilitado" : "Revalidar"}
                       </span>
                     </div>
+                    {canAuthorizeOperations && (
+                      <div className="ops-actions-row" style={{ marginBlockStart: "0.45rem" }}>
+                        <button
+                          type="button"
+                          className="btn btn--sm"
+                          disabled={!isOnline || busy}
+                          onClick={() => void handleInspectCorridor(c.corridor_id)}
+                        >
+                          Revalidar inspección
+                        </button>
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -431,6 +528,87 @@ export function BridgesPanel({
             </div>
             <button type="submit" className="btn btn--primary btn--block" disabled={!isOnline || busy}>
               Autorizar ventana
+            </button>
+          </form>
+        </details>
+      )}
+
+      {canAuthorizeOperations && nodes.length >= 2 && (
+        <details className="disclosure-card">
+          <summary>Registrar paso de transbordo</summary>
+          <form
+            onSubmit={handleCreateTransferCorridor}
+            className="clean-form"
+            style={{ marginBlockStart: "0.75rem" }}
+          >
+            <div className="field field--tight">
+              <label htmlFor="tc-side-a">Nodo lado A</label>
+              <select
+                id="tc-side-a"
+                className="brand-select"
+                value={effSideA}
+                onChange={(e) => setSideANodeId(e.target.value)}
+              >
+                {nodes.slice(0, 60).map((n) => (
+                  <option key={n.node_id} value={n.node_id}>
+                    {n.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field field--tight">
+              <label htmlFor="tc-side-b">Nodo lado B</label>
+              <select
+                id="tc-side-b"
+                className="brand-select"
+                value={effSideB}
+                onChange={(e) => setSideBNodeId(e.target.value)}
+              >
+                {nodes.slice(0, 60).map((n) => (
+                  <option key={n.node_id} value={n.node_id}>
+                    {n.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field field--tight">
+              <label htmlFor="tc-mode">Modalidad</label>
+              <select
+                id="tc-mode"
+                className="brand-select"
+                value={tcMode}
+                onChange={(e) =>
+                  setTcMode(e.target.value as "PEDESTRIAN_SAFE_PATH" | "SHUTTLE_RELAY")
+                }
+              >
+                <option value="PEDESTRIAN_SAFE_PATH">Paso peatonal seguro</option>
+                <option value="SHUTTLE_RELAY">Relevo vehicular</option>
+              </select>
+            </div>
+            <div className="two-col-inline">
+              <div className="field field--tight">
+                <label htmlFor="tc-len">Longitud (m)</label>
+                <input
+                  id="tc-len"
+                  type="text"
+                  inputMode="numeric"
+                  value={tcLengthM}
+                  onChange={(e) => setTcLengthM(e.target.value)}
+                />
+              </div>
+              <div className="field field--tight">
+                <label htmlFor="tc-slope">Pendiente %</label>
+                <input
+                  id="tc-slope"
+                  type="text"
+                  inputMode="decimal"
+                  value={tcMaxSlopePct}
+                  onChange={(e) => setTcMaxSlopePct(e.target.value)}
+                />
+              </div>
+            </div>
+            <button type="submit" className="btn btn--primary btn--block" disabled={!isOnline || busy}>
+              Certificar paso de transbordo
             </button>
           </form>
         </details>

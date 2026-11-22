@@ -16,6 +16,7 @@ import {
   IconCar,
   IconClock,
   IconRoute,
+  IconShare,
   IconSwap,
   IconTruck,
 } from "./Icons.tsx";
@@ -448,6 +449,40 @@ export function RoutingPanel({
                   <strong>{result.max_ivv_on_route.toFixed(0)}</strong>
                   <span>IVV máx</span>
                 </div>
+              </div>
+
+              {result.economic_impact && (
+                <div className="econ-impact-strip">
+                  <span>
+                    Ahorro vs cierre 4 h:{" "}
+                    <strong>+{result.economic_impact.time_saved_vs_blockage_min.toFixed(0)} min</strong>
+                  </span>
+                  <span>
+                    Huella: <strong>{result.economic_impact.estimated_co2_kg.toFixed(1)} kg CO₂</strong>
+                  </span>
+                  {result.economic_impact.estimated_cargo_loss_avoided_usd > 0 && (
+                    <span className="econ-savings-highlight">
+                      Merma evitada:{" "}
+                      <strong>
+                        ${result.economic_impact.estimated_cargo_loss_avoided_usd.toFixed(2)} USD
+                      </strong>
+                    </span>
+                  )}
+                </div>
+              )}
+
+              <div className="ops-actions-row" style={{ marginBlockStart: "0.55rem" }}>
+                <a
+                  className="btn btn--sm"
+                  href={`https://wa.me/?text=${encodeURIComponent(
+                    `PARADIXE SOFT · Ruta verificable: ${result.total_distance_km.toFixed(1)} km, ${result.estimated_time_min} min (IVV máx ${result.max_ivv_on_route.toFixed(0)}). Confirmar siempre con COER.`
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <IconShare size={14} />
+                  <span>Compartir por WhatsApp</span>
+                </a>
               </div>
             </>
           )}

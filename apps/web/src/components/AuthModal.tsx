@@ -5,6 +5,7 @@ import {
   getOrCreateDeviceId,
   postAuthLogin,
   postAuthOtpRequest,
+  postAuthRegister,
   type AuthMeResponse,
   type AuthTokenResponse,
 } from "../api/client.ts";
@@ -17,7 +18,7 @@ export interface AuthModalProps {
   onAuthenticated: (tokens: AuthTokenResponse, user: AuthMeResponse) => void;
 }
 
-type AuthMode = "password" | "otp";
+type AuthMode = "password" | "otp" | "register";
 
 export function AuthModal({ open, onClose, onAuthenticated }: AuthModalProps) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
@@ -33,6 +34,7 @@ export function AuthModal({ open, onClose, onAuthenticated }: AuthModalProps) {
 
   const [mode, setMode] = useState<AuthMode>("password");
   const [phoneE164, setPhoneE164] = useState("+51962000100");
+  const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
@@ -206,6 +208,29 @@ export function AuthModal({ open, onClose, onAuthenticated }: AuthModalProps) {
     }
   }
 
+  async function handleRegisterSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setErrorMsg(null);
+    setSubmitting(true);
+    try {
+      const tokens = await postAuthRegister({
+        phone_e164: phoneE164.trim(),
+        full_name: fullName.trim(),
+        password,
+        device_id: getOrCreateDeviceId(),
+      });
+      await finishLogin(tokens);
+    } catch (err) {
+      if (err instanceof ApiClientError) {
+        setErrorMsg(`${err.errorCode}: ${err.message}`);
+      } else {
+        setErrorMsg("No fue posible completar el registro.");
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <dialog
       ref={dialogRef}
@@ -251,6 +276,17 @@ export function AuthModal({ open, onClose, onAuthenticated }: AuthModalProps) {
             }}
           >
             SMS OTP (6 dígitos)
+          </button>
+          <button
+            type="button"
+            className={`segmented-pill${mode === "register" ? " is-active" : ""}`}
+            aria-pressed={mode === "register"}
+            onClick={() => {
+              setErrorMsg(null);
+              setMode("register");
+            }}
+          >
+            Registrarme
           </button>
         </div>
 
@@ -329,6 +365,63 @@ export function AuthModal({ open, onClose, onAuthenticated }: AuthModalProps) {
               </button>
               <button type="submit" className="btn btn--primary" disabled={submitting}>
                 {submitting ? "Verificando..." : "Iniciar sesión"}
+              </button>
+            </div>
+          </form>
+        ) : mode === "register" ? (
+          <form onSubmit={handleRegisterSubmit} aria-labelledby={titleId}>
+            <div className="field">
+              <label htmlFor="reg-full-name">Nombre y apellido</label>
+              <input
+                id="reg-full-name"
+                name="full_name"
+                type="text"
+                autoComplete="name"
+                required
+                maxLength={120}
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+              />
+            </div>
+
+            <div className="field">
+              <label htmlFor="reg-phone">Teléfono móvil (E.164)</label>
+              <input
+                id="reg-phone"
+                name="phone_e164"
+                type="tel"
+                autoComplete="tel"
+                required
+                pattern="^\+\d{7,19}$"
+                value={phoneE164}
+                onChange={(e) => setPhoneE164(e.target.value)}
+              />
+            </div>
+
+            <div className="field">
+              <label htmlFor="reg-password">Crear contraseña (mín. 10 caracteres)</label>
+              <input
+                id="reg-password"
+                name="new_password"
+                type={showPassword ? "text" : "password"}
+                autoComplete="new-password"
+                required
+                minLength={10}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => dialogRef.current && void closeTopLayer(dialogRef.current)}
+              >
+                Cancelar
+              </button>
+              <button type="submit" className="btn btn--primary" disabled={submitting}>
+                {submitting ? "Registrando..." : "Crear cuenta de conductor"}
               </button>
             </div>
           </form>
