@@ -1,11 +1,12 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   ApiClientError,
   patchIncidentVerification,
   type IncidentListItem,
   type RoleCode,
 } from "../api/client.ts";
-import { IconAlert, IconPlus } from "./Icons.tsx";
+import { attachDialogLightDismissFallback, closeTopLayer } from "../utils/topLayer.ts";
+import { IconAlert, IconPlus, IconX } from "./Icons.tsx";
 
 export interface IncidentsPanelProps {
   incidents: IncidentListItem[];
@@ -49,9 +50,17 @@ export function IncidentsPanel({
   onToast,
 }: IncidentsPanelProps) {
   const headingId = useId();
+  const lightboxTitleId = useId();
+  const lightboxRef = useRef<HTMLDialogElement | null>(null);
+
   const [stateFilter, setStateFilter] = useState<string>("ALL");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [lightboxPhoto, setLightboxPhoto] = useState<{
+    uri: string;
+    corridor: string;
+    detectedAt: string;
+  } | null>(null);
 
   const canVerify = Boolean(
     authToken && (userRole === "COER_ADMIN" || userRole === "CIVIL_DEFENSE")
@@ -61,6 +70,39 @@ export function IncidentsPanel({
     stateFilter === "ALL"
       ? incidents
       : incidents.filter((inc) => inc.verification_state === stateFilter);
+
+  useEffect(() => {
+    const dialog = lightboxRef.current;
+    if (!dialog) return;
+
+    const detachFallback = attachDialogLightDismissFallback(dialog);
+    const onDialogClose = () => {
+      dialog.returnValue = "";
+      setLightboxPhoto(null);
+    };
+    const onCancel = (e: Event) => {
+      e.preventDefault();
+      void closeTopLayer(dialog);
+    };
+
+    dialog.addEventListener("close", onDialogClose);
+    dialog.addEventListener("cancel", onCancel);
+    return () => {
+      detachFallback();
+      dialog.removeEventListener("close", onDialogClose);
+      dialog.removeEventListener("cancel", onCancel);
+    };
+  }, []);
+
+  useEffect(() => {
+    const dialog = lightboxRef.current;
+    if (!dialog) return;
+    if (lightboxPhoto && !dialog.open) {
+      dialog.showModal();
+    } else if (!lightboxPhoto && dialog.open) {
+      void closeTopLayer(dialog);
+    }
+  }, [lightboxPhoto]);
 
   async function handleVerify(
     incidentId: string,
@@ -155,6 +197,7 @@ export function IncidentsPanel({
                   : inc.verification_state === "RESOLVED"
                     ? "risk-badge--GREEN"
                     : "risk-badge--UNKNOWN";
+            const photos = inc.evidence_photos ?? [];
 
             return (
               <li key={inc.incident_id} className="ops-list-item">
@@ -174,6 +217,35 @@ export function IncidentsPanel({
                     minute: "2-digit",
                   })}
                 </p>
+
+                {photos.length > 0 && (
+                  <div className="evidence-thumb-strip" role="group" aria-label="Fotos de evidencia">
+                    {photos.map((uri, idx) => (
+                      <button
+                        key={`${inc.incident_id}-pic-${idx}`}
+                        type="button"
+                        className="evidence-thumb-btn"
+                        aria-label={`Ampliar foto ${idx + 1} de ${inc.corridor_name}`}
+                        onClick={() =>
+                          setLightboxPhoto({
+                            uri,
+                            corridor: inc.corridor_name,
+                            detectedAt: inc.detected_at,
+                          })
+                        }
+                      >
+                        <img
+                          src={uri}
+                          alt={`Evidencia en ${inc.corridor_name}`}
+                          width={72}
+                          height={54}
+                          loading="lazy"
+                          className="evidence-list-thumb"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                )}
 
                 {canVerify && isActive && (
                   <div className="ops-actions-row">
@@ -222,6 +294,42 @@ export function IncidentsPanel({
           })}
         </ul>
       )}
+
+      <dialog
+        ref={lightboxRef}
+        className="modal-dialog modal-dialog--lightbox"
+        aria-labelledby={lightboxTitleId}
+        {...({ closedby: "any" } as Record<string, string>)}
+      >
+        <div className="modal-content">
+          <div className="modal-header">
+            <div>
+              <h2 id={lightboxTitleId}>{lightboxPhoto?.corridor ?? "Evidencia en campo"}</h2>
+              {lightboxPhoto && (
+                <p className="panel-subtitle">
+                  Capturada el {new Date(lightboxPhoto.detectedAt).toLocaleString("es-PE")}
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              className="icon-btn"
+              autoFocus
+              aria-label="Cerrar foto ampliada"
+              onClick={() => lightboxRef.current && void closeTopLayer(lightboxRef.current)}
+            >
+              <IconX size={18} />
+            </button>
+          </div>
+          {lightboxPhoto && (
+            <img
+              src={lightboxPhoto.uri}
+              alt={`Evidencia ampliada de ${lightboxPhoto.corridor}`}
+              className="lightbox-full-img"
+            />
+          )}
+        </div>
+      </dialog>
     </div>
   );
 }

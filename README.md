@@ -133,12 +133,13 @@ Salida determinista esperada: `"ivv_score": "84.00"`, `"risk_level": "RED"`.
 | :--- | :--- |
 | [`crates/`](./crates) | Cargo Workspace en Rust (`paradixe-domain`, `paradixe-ivv`, `paradixe-consensus`, `paradixe-routing`, `paradixe-impact`, `paradixe-api`, `paradixe-ingestor`, `paradixe-messaging`) |
 | [`apps/web/`](./apps/web) | PWA Offline-First en React + TypeScript + MapLibre GL JS + PMTiles + IndexedDB + SSE |
-| [`openapi/openapi-v1.json`](./openapi/openapi-v1.json) | Contrato OpenAPI 3.1.0 canónico (`/api/v1`, 40 rutas y esquemas discriminados) |
-| [`migrations/`](./migrations) | Esquema PostgreSQL 16 + PostGIS 3.4 (`0001`..`0005`: 3NF, `territorial_units`, pronósticos IVV +72h y suscripciones de flota) |
-| [`infra/`](./infra) | Nginx reverse proxy HTTP/2 + SSE y configuración de despliegue productivo |
+| [`openapi/openapi-v1.json`](./openapi/openapi-v1.json) | Contrato OpenAPI 3.1.0 canónico (`/api/v1`, 46 rutas, autenticación Dual JWT/`X-API-Key` y esquemas discriminados) |
+| [`migrations/`](./migrations) | Esquema PostgreSQL 16 + PostGIS 3.4 (`0001`..`0006`: 3NF, `territorial_units`, pronósticos IVV +72h, alertas y API Keys/Webhooks B2B) |
+| [`infra/`](./infra) | Nginx hardening (CSP/COOP/CORP/gzip/rate-limit), plantilla HTTPS TLS 1.3 y observabilidad Prometheus/Grafana |
 | [`docker-compose.yml`](./docker-compose.yml) | Orquestación local de PostGIS 16 y RustFS S3 en Rust (puerto 9000 / consola 9001) |
 | [`docker-compose.prod.yml`](./docker-compose.prod.yml) | Stack productivo completo (`postgres`, `rustfs`, `api`, `messaging`, `weather-worker`, `web`) |
-| [`scripts/`](./scripts) | Bootstrap DB, semillas, daemon meteorológico y validación integral (`verify_full_e2e.sh`) |
+| [`docker-compose.observability.yml`](./docker-compose.observability.yml) | Overlay de monitoreo Prometheus + alertas y Grafana COER (`/metrics`) |
+| [`scripts/`](./scripts) | Bootstrap DB, respaldos PostGIS (`backup_postgis.sh` / `restore_postgis.sh`), daemon climático y suite `verify_full_e2e.sh` |
 | [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) | Pipeline CI en GitHub Actions (Rust fmt/clippy/test, PWA Vite/Vitest y migraciones PostGIS) |
 | [`docs/PARADIXE_SOFT.md`](./docs/PARADIXE_SOFT.md) | Especificación técnica ejecutable completa (`2.0.0-prod-sdd-rust`) |
 | [`.github/PULL_REQUEST_TEMPLATE.md`](./.github/PULL_REQUEST_TEMPLATE.md) | Checklist SDD, PostGIS `::geography`, privacidad y pruebas para Pull Requests |
@@ -219,25 +220,29 @@ cd apps/web && npm install && npm run dev
 ./scripts/verify_full_e2e.sh
 ```
 
-### 7. Despliegue Productivo con Docker Compose
+### 7. Despliegue Productivo, Observabilidad y Respaldos PostGIS
 ```bash
-# Stack completo: PostGIS 16 + RustFS S3 + paradixe-api + paradixe-messaging + weather-worker + Nginx PWA
-docker compose -f docker-compose.prod.yml config -q
-docker compose -f docker-compose.prod.yml up -d --build
+# Stack completo + monitoreo Prometheus/Grafana
+docker compose -f docker-compose.prod.yml -f docker-compose.observability.yml config -q
+docker compose -f docker-compose.prod.yml -f docker-compose.observability.yml up -d --build
+
+# Respaldo comprimido de PostGIS con verificación SHA-256 (y restauración segura)
+./scripts/backup_postgis.sh ./backups
+./scripts/restore_postgis.sh ./backups/paradixe_postgis_YYYYMMDDTHHMMSSZ.dump --confirm-restore
 ```
-Incluye streaming en tiempo real vía Server-Sent Events (`/api/v1/events/stream`), evidencias fotográficas presignadas/proxy en RustFS (`/api/v1/uploads/{presign,evidence}`), suscripciones de alertas para flotas WhatsApp/SMS (`/api/v1/subscriptions`), exportación analítica COER y métricas Prometheus (`/metrics`).
+Incluye streaming en tiempo real Server-Sent Events (`/api/v1/events/stream`), evidencias fotográficas presignadas/proxy en RustFS (`/api/v1/uploads/{presign,evidence}`), API Keys B2B (`X-API-Key`), webhooks salientes firmados con HMAC y guardas anti-SSRF (`/api/v1/b2b/*`), ruteo multiparada (`/api/v1/routing/multi-stop`), telemetría GPS anónima rotativa, Nginx con CSP estricta/rate-limiting (`infra/nginx/tls.conf.template` para HTTPS) y alertas Prometheus/Grafana (`/metrics`).
 
 ---
 
 ## Hoja de Ruta de Producción
 
-- [x] **Etapa 0 — Arquitectura SDD y Base de Datos:** Especificación `2.0.0-prod-sdd-rust`, esquema PostgreSQL 16 + PostGIS 3.4 (27 tablas 3NF + migraciones `0003`..`0005`), semillas base e infraestructura Docker (PostGIS + RustFS).
-- [x] **Etapa 1A — Contrato OpenAPI 3.1 y Motores CLI en Rust:** `openapi-v1.json` (40 rutas), Cargo Workspace con `#![forbid(unsafe_code)]`, precisión `MidpointAwayFromZero` y suite de pruebas unitarias SDD.
-- [x] **Etapa 1B — PWA Offline-First (`apps/web`):** MapLibre GL JS + PMTiles v3, paquetes regionales descargables en IndexedDB (`sync_control` + `outbox_queue`), captura fotográfica comprimida, GPS/WhatsApp UX y modo Sala COER / impresión.
-- [x] **Etapa 2A — API Core (`paradixe-api`):** Servidor Axum/SQLx (`/api/v1`), podado espacial de ruteo, impacto económico, roles RBAC, registro de conductores, pasos de transbordo, SSE en vivo, S3 RustFS y métricas Prometheus (`/metrics`).
-- [x] **Etapa 2B — Ingestor Real Multi-Región (`paradixe-ingestor`):** Worker escalable OSM Geofabrik + NASA SRTM 30m + puntos críticos geotécnicos (`hotspots-sync`) + pronóstico IVV `+24/+48/+72h` (`forecast-sync`) + `PMTiles v3` sobre la Macro-Región Centro (`PE-HUC`, `PE-PAS`, `PE-JUN`, `PE-UCA`).
+- [x] **Etapa 0 — Arquitectura SDD y Base de Datos:** Especificación `2.0.0-prod-sdd-rust`, esquema PostgreSQL 16 + PostGIS 3.4 (27 tablas 3NF + migraciones `0003`..`0006`), semillas base, respaldo/restauración e infraestructura Docker (PostGIS + RustFS).
+- [x] **Etapa 1A — Contrato OpenAPI 3.1 y Motores CLI en Rust:** `openapi-v1.json` (46 rutas), Cargo Workspace con `#![forbid(unsafe_code)]`, precisión `MidpointAwayFromZero` y suite de pruebas unitarias SDD.
+- [x] **Etapa 1B — PWA Offline-First (`apps/web`):** MapLibre GL JS + PMTiles v3, code-splitting en chunks, renovación automática JWT, lightbox fotográfico, deep-links compartibles, ruteo multiparada, paquetes offline descargables y modo Sala COER / móvil pulido.
+- [x] **Etapa 2A — API Core (`paradixe-api`):** Servidor Axum/SQLx (`/api/v1`), podado espacial, ruteo multiparada, impacto económico, dual auth (`Bearer` / `X-API-Key`), webhooks B2B anti-SSRF con firma HMAC, SSE en vivo, S3 RustFS, `Clear-Site-Data` y métricas Prometheus.
+- [x] **Etapa 2B — Ingestor Real Multi-Región (`paradixe-ingestor`):** Worker escalable OSM Geofabrik + NASA SRTM 30m + puntos críticos geotécnicos (`hotspots-sync`) + pronóstico IVV `+24/+48/+72h` (`forecast-sync`) + `PMTiles v3` sobre la Macro-Región Centro (100% de ejes pavimentados certificados: `6,482 / 6,482` tramos en `PE-HUC`, `PE-JUN`, `PE-PAS`, `PE-UCA`).
 - [x] **Etapa 3 — Mensajería Multicanal (`paradixe-messaging`):** Adaptadores de producción WhatsApp Cloud API y fallback SMS con parser ciudadano en español, despacho automático por suscripciones y firmas HMAC constantes.
-- [x] **Etapa 4 — Plataforma Productiva B2B/B2G Lista para Piloto Macro-Regional:** Cobertura validada en 4 departamentos (27 provincias, 424 distritos), suite E2E viva (`verify_full_e2e.sh`) y despliegue productivo Docker Compose + Nginx.
+- [x] **Etapa 4 — Plataforma Productiva B2B/B2G Lista para Piloto Macro-Regional:** Cobertura validada en 4 departamentos (27 provincias, 424 distritos), suite E2E viva (`verify_full_e2e.sh`) y observabilidad Prometheus/Grafana + Nginx hardening.
 
 ---
 

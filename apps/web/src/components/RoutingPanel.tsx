@@ -1,9 +1,11 @@
 import { useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import {
   ApiClientError,
+  postMultiStopRouting,
   postRoutingCalculate,
   type CargoType,
   type CorridorSegmentFeature,
+  type MultiStopRoutingResponse,
   type NoSafeRouteReasonCode,
   type RoadNodeItem,
   type RoutingCalculateResponse,
@@ -15,9 +17,12 @@ import {
   IconBike,
   IconCar,
   IconClock,
+  IconCopy,
+  IconPlus,
   IconRoute,
   IconShare,
   IconSwap,
+  IconTrash,
   IconTruck,
 } from "./Icons.tsx";
 
@@ -28,7 +33,16 @@ export interface RoutingPanelProps {
   authToken: string | null;
   externalOriginNodeId?: string | null;
   externalDestinationNodeId?: string | null;
+  initialVehicle?: VehicleCategoryCode;
+  initialCargo?: CargoType;
   onRouteComputed?: (overlay: RouteOverlayData | null) => void;
+  onBuildShareUrl?: (params: {
+    origin: string;
+    dest: string;
+    vehicle: VehicleCategoryCode;
+    cargo: CargoType;
+  }) => string;
+  onToast?: (message: string) => void;
 }
 
 const VEHICLE_OPTIONS: Array<{
@@ -83,7 +97,11 @@ export function RoutingPanel({
   authToken,
   externalOriginNodeId,
   externalDestinationNodeId,
+  initialVehicle,
+  initialCargo,
   onRouteComputed,
+  onBuildShareUrl,
+  onToast,
 }: RoutingPanelProps) {
   const formTitleId = useId();
   const nodeFilterId = useId();
@@ -92,12 +110,16 @@ export function RoutingPanel({
   const [nodeFilter, setNodeFilter] = useState("");
   const [originNodeId, setOriginNodeId] = useState("");
   const [destinationNodeId, setDestinationNodeId] = useState("");
-  const [vehicleCode, setVehicleCode] = useState<VehicleCategoryCode>("AMBULANCE_4X4");
-  const [cargoType, setCargoType] = useState<CargoType>("MEDICAL_PATIENT");
+  const [viaNodeIds, setViaNodeIds] = useState<string[]>([]);
+  const [vehicleCode, setVehicleCode] = useState<VehicleCategoryCode>(
+    initialVehicle ?? "AMBULANCE_4X4"
+  );
+  const [cargoType, setCargoType] = useState<CargoType>(initialCargo ?? "MEDICAL_PATIENT");
   const [cargoPayloadKg, setCargoPayloadKg] = useState("1200");
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [result, setResult] = useState<RoutingCalculateResponse | null>(null);
+  const [multiResult, setMultiResult] = useState<MultiStopRoutingResponse | null>(null);
 
   useEffect(() => {
     if (externalOriginNodeId) setOriginNodeId(externalOriginNodeId);
@@ -106,6 +128,19 @@ export function RoutingPanel({
   useEffect(() => {
     if (externalDestinationNodeId) setDestinationNodeId(externalDestinationNodeId);
   }, [externalDestinationNodeId]);
+
+  useEffect(() => {
+    if (initialVehicle) setVehicleCode(initialVehicle);
+  }, [initialVehicle]);
+
+  useEffect(() => {
+    if (initialCargo) setCargoType(initialCargo);
+  }, [initialCargo]);
+
+  const featureMap = useMemo(
+    () => new Map(features.map((f) => [f.properties.segment_id, f])),
+    [features]
+  );
 
   const allNodeOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -163,7 +198,7 @@ export function RoutingPanel({
           );
     const sliced = matching.slice(0, MAX_SELECT_OPTIONS);
     const seen = new Set(sliced.map(([id]) => id));
-    for (const selectedId of [effectiveOrigin, effectiveDest]) {
+    for (const selectedId of [effectiveOrigin, ...viaNodeIds, effectiveDest]) {
       if (selectedId && !seen.has(selectedId)) {
         const found = allNodeOptions.find(([id]) => id === selectedId);
         if (found) {
@@ -173,12 +208,33 @@ export function RoutingPanel({
       }
     }
     return { visibleNodes: sliced };
-  }, [allNodeOptions, nodeFilter, effectiveOrigin, effectiveDest]);
+  }, [allNodeOptions, nodeFilter, effectiveOrigin, effectiveDest, viaNodeIds]);
 
   const handleSwap = () => {
     setOriginNodeId(effectiveDest);
     setDestinationNodeId(effectiveOrigin);
+    if (viaNodeIds.length > 1) {
+      setViaNodeIds([...viaNodeIds].reverse());
+    }
   };
+
+  function collectRouteCoords(
+    hops: Array<{ segment_id: string; direction: string }>
+  ): [number, number][] {
+    const coords: [number, number][] = [];
+    for (const hop of hops) {
+      const seg = featureMap.get(hop.segment_id);
+      if (!seg) continue;
+      const pts =
+        hop.direction === "DEST_TO_ORIGIN"
+          ? [...seg.geometry.coordinates].reverse()
+          : seg.geometry.coordinates;
+      for (const c of pts) {
+        if (c.length >= 2) coords.push([c[0], c[1]]);
+      }
+    }
+    return coords;
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -193,44 +249,68 @@ export function RoutingPanel({
     }
 
     setSubmitting(true);
+    setResult(null);
+    setMultiResult(null);
     try {
       const parsedWeight = Number(cargoPayloadKg);
-      const response = await postRoutingCalculate(
-        {
-          origin_node_id: effectiveOrigin,
-          destination_node_id: effectiveDest,
-          vehicle_category_code: vehicleCode,
-          cargo_type: cargoType,
-          ...(cargoType === "MEDICAL_PATIENT"
-            ? { patient_count: 1 }
-            : { cargo_payload_kg: parsedWeight }),
-        },
-        authToken
-      );
-      setResult(response);
+      const payloadArgs =
+        cargoType === "MEDICAL_PATIENT"
+          ? { patient_count: 1 }
+          : { cargo_payload_kg: parsedWeight };
 
-      if (response.resolution_type === "ALTERNATE_ROUTE") {
-        const segMap = new Map(features.map((f) => [f.properties.segment_id, f]));
-        const coords: [number, number][] = [];
-        for (const hop of response.hops) {
-          const seg = segMap.get(hop.segment_id);
-          if (!seg) continue;
-          const pts =
-            hop.direction === "DEST_TO_ORIGIN"
-              ? [...seg.geometry.coordinates].reverse()
-              : seg.geometry.coordinates;
-          for (const c of pts) {
-            if (c.length >= 2) coords.push([c[0], c[1]]);
+      const cleanVias = viaNodeIds.filter((id) => id.length > 0);
+      if (cleanVias.length > 0) {
+        const stops = [effectiveOrigin, ...cleanVias, effectiveDest];
+        const multiResp = await postMultiStopRouting(
+          {
+            stop_node_ids: stops,
+            vehicle_category_code: vehicleCode,
+            cargo_type: cargoType,
+            ...payloadArgs,
+          },
+          authToken
+        );
+        setMultiResult(multiResp);
+        const allCoords: [number, number][] = [];
+        for (const leg of multiResp.legs) {
+          if (leg.resolution.resolution_type === "ALTERNATE_ROUTE") {
+            allCoords.push(...collectRouteCoords(leg.resolution.hops));
           }
         }
-        onRouteComputed?.({
-          coordinates: coords,
-          origin: coords[0] ?? null,
-          destination: coords[coords.length - 1] ?? null,
-          label: `${response.total_distance_km.toFixed(1)} km`,
-        });
+        if (allCoords.length > 0 && multiResp.overall_status !== "NO_SAFE_ROUTE") {
+          onRouteComputed?.({
+            coordinates: allCoords,
+            origin: allCoords[0] ?? null,
+            destination: allCoords[allCoords.length - 1] ?? null,
+            label: `${multiResp.total_distance_km.toFixed(1)} km (${stops.length} paradas)`,
+          });
+        } else {
+          onRouteComputed?.(null);
+        }
       } else {
-        onRouteComputed?.(null);
+        const response = await postRoutingCalculate(
+          {
+            origin_node_id: effectiveOrigin,
+            destination_node_id: effectiveDest,
+            vehicle_category_code: vehicleCode,
+            cargo_type: cargoType,
+            ...payloadArgs,
+          },
+          authToken
+        );
+        setResult(response);
+
+        if (response.resolution_type === "ALTERNATE_ROUTE") {
+          const coords = collectRouteCoords(response.hops);
+          onRouteComputed?.({
+            coordinates: coords,
+            origin: coords[0] ?? null,
+            destination: coords[coords.length - 1] ?? null,
+            label: `${response.total_distance_km.toFixed(1)} km`,
+          });
+        } else {
+          onRouteComputed?.(null);
+        }
       }
     } catch (err) {
       if (err instanceof ApiClientError) {
@@ -243,6 +323,28 @@ export function RoutingPanel({
     }
   }
 
+  const shareUrl =
+    onBuildShareUrl && effectiveOrigin && effectiveDest
+      ? onBuildShareUrl({
+          origin: effectiveOrigin,
+          dest: effectiveDest,
+          vehicle: vehicleCode,
+          cargo: cargoType,
+        })
+      : typeof window !== "undefined"
+        ? window.location.href
+        : "";
+
+  async function handleCopyShareUrl() {
+    if (!shareUrl) return;
+    try {
+      await navigator.clipboard?.writeText(shareUrl);
+      onToast?.("Enlace de ruta copiado.");
+    } catch {
+      onToast?.("No se pudo copiar al portapapeles.");
+    }
+  }
+
   return (
     <div className="panel-stack" aria-labelledby={formTitleId}>
       <div className="panel-heading-row">
@@ -252,6 +354,22 @@ export function RoutingPanel({
           </h2>
           <p className="panel-subtitle">Rutas verificadas según vehículo y clima</p>
         </div>
+        {viaNodeIds.length < 4 && allNodeOptions.length > 2 && (
+          <button
+            type="button"
+            className="btn btn--sm"
+            onClick={() =>
+              setViaNodeIds((prev) => [
+                ...prev,
+                allNodeOptions[Math.min(prev.length + 2, allNodeOptions.length - 1)]?.[0] ??
+                  effectiveOrigin,
+              ])
+            }
+          >
+            <IconPlus size={14} />
+            <span>Parada</span>
+          </button>
+        )}
       </div>
 
       {!isOnline && (
@@ -306,6 +424,44 @@ export function RoutingPanel({
                 </span>
               </div>
             </div>
+
+            {viaNodeIds.map((viaId, idx) => (
+              <div key={`via-stop-${idx}`}>
+                <div className="route-stop-divider" />
+                <div className="route-stop-row">
+                  <span className="stop-dot stop-dot--via" aria-hidden="true" />
+                  <div className="field field--flush" style={{ flex: 1 }}>
+                    <label htmlFor={`route-via-${idx}`} className="visually-hidden">
+                      Parada intermedia {idx + 1}
+                    </label>
+                    <select
+                      id={`route-via-${idx}`}
+                      className="brand-select"
+                      value={viaId}
+                      onChange={(e) =>
+                        setViaNodeIds((prev) =>
+                          prev.map((v, i) => (i === idx ? e.target.value : v))
+                        )
+                      }
+                    >
+                      {visibleNodes.map(([id, label]) => (
+                        <option key={id} value={id}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    className="icon-btn icon-btn--sm"
+                    aria-label={`Quitar parada ${idx + 1}`}
+                    onClick={() => setViaNodeIds((prev) => prev.filter((_, i) => i !== idx))}
+                  >
+                    <IconTrash size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
 
             <div className="route-stop-divider" />
 
@@ -426,6 +582,54 @@ export function RoutingPanel({
         </div>
       )}
 
+      {multiResult && (
+        <div className="result-surface" aria-live="polite">
+          {multiResult.overall_status === "NO_SAFE_ROUTE" ? (
+            <div className="banner banner--danger" role="alert">
+              <strong>
+                NO_SAFE_ROUTE ({multiResult.blocking_reason_code ?? "NETWORK_DISCONNECTED"})
+              </strong>
+              <p style={{ marginBlock: "0.25rem 0" }}>
+                {multiResult.blocking_reason_code
+                  ? REASON_DESCRIPTIONS[multiResult.blocking_reason_code]
+                  : "Un tramo de la ruta multiparada no cuenta con paso verificable."}
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="result-top-row">
+                <strong>Ruta multiparada ({multiResult.legs.length} tramos)</strong>
+                <span className="risk-badge risk-badge--GREEN">{multiResult.overall_status}</span>
+              </div>
+              <div className="stat-pill-grid">
+                <div className="stat-mini">
+                  <strong>{multiResult.total_distance_km.toFixed(1)} km</strong>
+                  <span>Distancia</span>
+                </div>
+                <div className="stat-mini">
+                  <strong>{multiResult.estimated_time_min.toFixed(0)} min</strong>
+                  <span>Nominal</span>
+                </div>
+                <div className="stat-mini">
+                  <strong>{multiResult.max_ivv_on_route.toFixed(0)}</strong>
+                  <span>IVV máx</span>
+                </div>
+              </div>
+              {multiResult.economic_impact && (
+                <div className="econ-impact-strip">
+                  <span>
+                    Ahorro: <strong>+{multiResult.economic_impact.time_saved_vs_blockage_min.toFixed(0)} min</strong>
+                  </span>
+                  <span>
+                    Huella: <strong>{multiResult.economic_impact.estimated_co2_kg.toFixed(1)} kg CO₂</strong>
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
       {result && (
         <div className="result-surface" aria-live="polite">
           {result.resolution_type === "ALTERNATE_ROUTE" && (
@@ -471,17 +675,46 @@ export function RoutingPanel({
                 </div>
               )}
 
-              <div className="ops-actions-row" style={{ marginBlockStart: "0.55rem" }}>
+              {result.hops.length > 0 && (
+                <details className="disclosure-inline">
+                  <summary>Ver detalle por tramos ({result.hops.length})</summary>
+                  <ol className="route-hops-list">
+                    {result.hops.map((hop, idx) => {
+                      const seg = featureMap.get(hop.segment_id);
+                      const risk = seg?.properties.is_stale
+                        ? "UNKNOWN"
+                        : (seg?.properties.risk_level ?? "UNKNOWN");
+                      return (
+                        <li key={`${hop.segment_id}-${idx}`} className="route-hop-item">
+                          <span className="route-hop-name">
+                            {seg?.properties.corridor_name ?? `Tramo ${idx + 1}`}
+                          </span>
+                          <span className="route-hop-meta">
+                            {seg ? `${seg.properties.length_km.toFixed(1)} km` : ""}
+                            <span className={`risk-badge risk-badge--${risk}`}>{risk}</span>
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </details>
+              )}
+
+              <div className="ops-actions-row" style={{ marginBlockStart: "0.35rem" }}>
+                <button type="button" className="btn btn--sm" onClick={() => void handleCopyShareUrl()}>
+                  <IconCopy size={14} />
+                  <span>Copiar enlace</span>
+                </button>
                 <a
                   className="btn btn--sm"
                   href={`https://wa.me/?text=${encodeURIComponent(
-                    `PARADIXE SOFT · Ruta verificable: ${result.total_distance_km.toFixed(1)} km, ${result.estimated_time_min} min (IVV máx ${result.max_ivv_on_route.toFixed(0)}). Confirmar siempre con COER.`
+                    `PARADIXE SOFT · Ruta verificable: ${result.total_distance_km.toFixed(1)} km, ${result.estimated_time_min} min (IVV máx ${result.max_ivv_on_route.toFixed(0)}). ${shareUrl}`
                   )}`}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
                   <IconShare size={14} />
-                  <span>Compartir por WhatsApp</span>
+                  <span>WhatsApp</span>
                 </a>
               </div>
             </>

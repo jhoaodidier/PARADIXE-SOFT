@@ -681,4 +681,291 @@ describe("UI Comercial, Fail-Safe y Accesibilidad PARADIXE SOFT", () => {
     expect(await screen.findByText("12.8%")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Exportar CSV" })).toBeInTheDocument();
   });
+
+  it("muestra miniaturas de evidencia en Alertas y abre visor lightbox nativo", async () => {
+    createDefaultFetchMock((url) => {
+      if (url.includes("/incidents")) {
+        return new Response(
+          JSON.stringify({
+            incidents: [
+              {
+                incident_id: "inc-pic-1",
+                segment_id: "33333333-3333-4333-8333-333333333333",
+                corridor_name: "Huánuco – Túnel Carpish",
+                trigger_source: "FIELD_CONSENSUS",
+                verification_state: "CONFIRMED",
+                impact_passability: "BLOCKED",
+                hazard_lat: -9.71,
+                hazard_lon: -76.09,
+                hazard_radius_m: 150,
+                detected_at: "2026-11-22T15:00:00Z",
+                confirmed_at: "2026-11-22T15:05:00Z",
+                resolved_at: null,
+                evidence_photos: ["/evidence/20261122/sample.jpg"],
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return null;
+    });
+
+    render(<App initialFeatures={SAMPLE_FEATURES} />);
+    fireEvent.click(screen.getByRole("tab", { name: /Alertas/ }));
+
+    const thumb = await screen.findByAltText("Evidencia en Huánuco – Túnel Carpish");
+    expect(thumb).toHaveAttribute("loading", "lazy");
+    expect(thumb).toHaveAttribute("src", "/evidence/20261122/sample.jpg");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Ampliar foto 1 de Huánuco – Túnel Carpish" })
+    );
+    const fullImg = await screen.findByAltText("Evidencia ampliada de Huánuco – Túnel Carpish");
+    expect(fullImg).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar foto ampliada" }));
+    await waitFor(() => {
+      expect(screen.queryByAltText("Evidencia ampliada de Huánuco – Túnel Carpish")).toBeNull();
+    });
+  });
+
+  it("renueva JWT automaticamente ante 401 en /routing/calculate y reintenta la peticion", async () => {
+    let routingAttempts = 0;
+    const fetchSpy = createDefaultFetchMock((url, init) => {
+      if (url.endsWith("/auth/login")) {
+        return new Response(
+          JSON.stringify({
+            access_token: "expired-jwt",
+            refresh_token: "valid-refresh-1",
+            token_type: "Bearer",
+            expires_in_sec: 900,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (url.endsWith("/auth/me")) {
+        return new Response(
+          JSON.stringify({
+            user_id: "u-coer",
+            phone_e164: "+51962000100",
+            full_name: "COER Huánuco (Admin)",
+            role_code: "COER_ADMIN",
+            reputation_score: 1.0,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (url.endsWith("/auth/refresh")) {
+        return new Response(
+          JSON.stringify({
+            access_token: "fresh-jwt-2",
+            refresh_token: "valid-refresh-2",
+            token_type: "Bearer",
+            expires_in_sec: 900,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (url.endsWith("/routing/calculate")) {
+        routingAttempts += 1;
+        const headers = new Headers(init?.headers);
+        if (routingAttempts === 1) {
+          return new Response(
+            JSON.stringify({
+              error_code: "UNAUTHORIZED",
+              message: "Expired token",
+              details: {},
+              request_id: "r1",
+            }),
+            { status: 401, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        expect(headers.get("Authorization")).toBe("Bearer fresh-jwt-2");
+        return new Response(
+          JSON.stringify({
+            resolution_type: "ALTERNATE_ROUTE",
+            routing_config_tag: "routing-v1.0",
+            total_distance_km: 12.4,
+            estimated_time_min: 18,
+            max_ivv_on_route: 28,
+            hops: [],
+            eta_quality: "NOMINAL",
+            operational_authorization: "REQUIRES_AUTHORITY_APPROVAL",
+            warnings: [],
+            economic_impact: {
+              estimated_co2_kg: 3.1,
+              baseline_blockage_co2_kg: 9.2,
+              co2_delta_kg: 6.1,
+              estimated_cargo_loss_avoided_usd: 420.5,
+              time_saved_vs_blockage_min: 222,
+              reference_blockage_hours: 4.0,
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return null;
+    });
+
+    render(<App initialFeatures={SAMPLE_FEATURES} />);
+    const header = screen.getByRole("banner");
+    fireEvent.click(within(header).getByRole("button", { name: "Iniciar sesión" }));
+    fireEvent.change(screen.getByLabelText("Contraseña"), {
+      target: { value: "ParadixeDev2026!" },
+    });
+    const authDialog = screen.getByRole("dialog", { name: "Acceso de Operador Territorial" });
+    fireEvent.click(within(authDialog).getByRole("button", { name: "Iniciar sesión" }));
+    await within(header).findByText(/COER Huánuco \(Admin\)/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Calcular ruta verificable" }));
+    expect(await screen.findByText("12.4 km")).toBeInTheDocument();
+    expect(
+      fetchSpy.mock.calls.some(([u]) => String(u).endsWith("/auth/refresh"))
+    ).toBe(true);
+  });
+
+  it("hidrata region, vehiculo y carga desde deep-link URL al iniciar", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/?region=PE-JUN&vehicle=PICKUP_4X4&cargo=PERISHABLE_AGRI"
+    );
+    try {
+      const fetchSpy = createDefaultFetchMock();
+      render(<App initialFeatures={SAMPLE_FEATURES} />);
+
+      expect(screen.getByLabelText("Camioneta 4x4")).toBeChecked();
+      expect(screen.getByLabelText("Agrícola")).toBeChecked();
+      await waitFor(() => {
+        expect(
+          fetchSpy.mock.calls.some(([u]) => String(u).includes("region=PE-JUN"))
+        ).toBe(true);
+      });
+    } finally {
+      window.history.replaceState({}, "", "/");
+    }
+  });
+
+  it("permite a COER_ADMIN consultar equipo y emitir API Key B2B en Ajustes", async () => {
+    createDefaultFetchMock((url, init) => {
+      if (url.endsWith("/auth/login")) {
+        return new Response(
+          JSON.stringify({
+            access_token: "admin-jwt",
+            refresh_token: "admin-ref",
+            token_type: "Bearer",
+            expires_in_sec: 900,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (url.endsWith("/auth/me")) {
+        return new Response(
+          JSON.stringify({
+            user_id: "u-coer",
+            phone_e164: "+51962000100",
+            full_name: "COER Huánuco (Admin)",
+            role_code: "COER_ADMIN",
+            reputation_score: 1.0,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (url.endsWith("/admin/users")) {
+        return new Response(
+          JSON.stringify({
+            users: [
+              {
+                user_id: "u-def",
+                phone_e164: "+51962000200",
+                full_name: "Defensa Civil Huánuco",
+                role_code: "CIVIL_DEFENSE",
+                reputation_score: 0.9,
+                is_active: true,
+                created_at: "2026-11-22T00:00:00Z",
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (url.endsWith("/b2b/api-keys") && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            api_key_id: "key-1",
+            organization_name: "AgroExport Centro SAC",
+            key_prefix: "pxk_live_demo123",
+            raw_api_key: "pxk_live_demo1234567890abcdef",
+            role_code: "DRIVER",
+            rate_limit_rpm: 120,
+            created_at: "2026-11-22T15:40:00Z",
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (url.endsWith("/b2b/api-keys")) {
+        return new Response(JSON.stringify({ api_keys: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.endsWith("/b2b/webhooks")) {
+        return new Response(JSON.stringify({ webhooks: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.endsWith("/subscriptions")) {
+        return new Response(JSON.stringify({ subscriptions: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.includes("/analytics/summary")) {
+        return new Response(
+          JSON.stringify({
+            region: "PE-HUC",
+            generated_at: "2026-11-22T19:57:00Z",
+            total_segments: 10694,
+            certified_segments: 1369,
+            certified_pct: 12.8,
+            risk_counts: { green: 10000, amber: 690, red: 4, unknown: 0 },
+            active_incidents_total: 0,
+            blocked_segments: 0,
+            partial_segments: 0,
+            active_bridges: 0,
+            active_windows: 0,
+            verified_transfer_corridors: 1,
+            hospitals_count: 215,
+            regions_count: 4,
+            provinces_count: 27,
+            districts_count: 424,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return null;
+    });
+
+    render(<App initialFeatures={SAMPLE_FEATURES} />);
+    const header = screen.getByRole("banner");
+    fireEvent.click(within(header).getByRole("button", { name: "Iniciar sesión" }));
+    fireEvent.change(screen.getByLabelText("Contraseña"), {
+      target: { value: "ParadixeDev2026!" },
+    });
+    const authDialog = screen.getByRole("dialog", { name: "Acceso de Operador Territorial" });
+    fireEvent.click(within(authDialog).getByRole("button", { name: "Iniciar sesión" }));
+    await within(header).findByText(/COER Huánuco \(Admin\)/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Configuración" }));
+    expect(await screen.findByText(/Equipo COER y Operadores \(1\)/)).toBeInTheDocument();
+    expect(screen.getByText("Defensa Civil Huánuco")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Empresa / Flota"), {
+      target: { value: "AgroExport Centro SAC" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Emitir API Key B2B" }));
+    expect(await screen.findByText("pxk_live_demo1234567890abcdef")).toBeInTheDocument();
+  });
 });

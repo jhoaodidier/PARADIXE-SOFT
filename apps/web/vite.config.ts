@@ -8,6 +8,15 @@ const apiProxyTarget =
 export default defineConfig({
   build: {
     target: "esnext",
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "vendor-react": ["react", "react-dom"],
+          "vendor-maplibre": ["maplibre-gl"],
+          "vendor-pmtiles": ["pmtiles"],
+        },
+      },
+    },
   },
   server: {
     proxy: {

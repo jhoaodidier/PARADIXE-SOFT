@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
+  configureAuthRefreshHandler,
   fetchAnalyticsSummary,
   fetchAuthMe,
   fetchBridgesOperations,
@@ -15,18 +16,21 @@ import {
   postAuthLogout,
   postAuthRefresh,
   postSyncBatch,
+  postTelemetryPings,
   postVerifyCorridorAttributes,
   type AnalyticsSummaryResponse,
   type AuthMeResponse,
   type AuthTokenResponse,
   type BridgesOperationsResponse,
+  type CargoType,
   type CorridorSegmentFeature,
   type IncidentListItem,
   type RoadNodeItem,
+  type TelemetryPingItem,
   type TerritorialUnit,
+  type VehicleCategoryCode,
 } from "./api/client.ts";
 import { AuthModal } from "./components/AuthModal.tsx";
-import { BridgesPanel } from "./components/BridgesPanel.tsx";
 import {
   CorridorMap,
   type FlyToTarget,
@@ -39,9 +43,11 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconCompass,
+  IconCopy,
   IconHospital,
   IconLogout,
   IconMoon,
+  IconNavigation,
   IconPin,
   IconPlus,
   IconRefresh,
@@ -49,6 +55,7 @@ import {
   IconSearch,
   IconSettings,
   IconShare,
+  IconSmartphone,
   IconSparkles,
   IconSun,
   IconUser,
@@ -60,8 +67,14 @@ import { RegionSelectorBar } from "./components/RegionSelectorBar.tsx";
 import { RiskBadge } from "./components/RiskBadge.tsx";
 import { RoutingPanel } from "./components/RoutingPanel.tsx";
 import { SettingsModal } from "./components/SettingsModal.tsx";
-import { SimulatorPanel } from "./components/SimulatorPanel.tsx";
 import { ToastRegion, type ToastMessage } from "./components/ToastRegion.tsx";
+
+const BridgesPanel = lazy(() =>
+  import("./components/BridgesPanel.tsx").then((m) => ({ default: m.BridgesPanel }))
+);
+const SimulatorPanel = lazy(() =>
+  import("./components/SimulatorPanel.tsx").then((m) => ({ default: m.SimulatorPanel }))
+);
 import {
   applySyncSnapshotAtomic,
   getCachedCorridors,
@@ -129,8 +142,55 @@ function writeStoredToken(key: string, value: string | null): void {
   }
 }
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+}
+
+function readInitialDeepLink() {
+  if (typeof window === "undefined") {
+    return {
+      region: "PE-HUC",
+      origin: null as string | null,
+      dest: null as string | null,
+      vehicle: undefined as VehicleCategoryCode | undefined,
+      cargo: undefined as CargoType | undefined,
+    };
+  }
+  const sp = new URLSearchParams(window.location.search);
+  const regionRaw = sp.get("region")?.trim().toUpperCase();
+  const originRaw = sp.get("origin")?.trim() || null;
+  const destRaw = sp.get("dest")?.trim() || null;
+  const vehicleRaw = sp.get("vehicle")?.trim().toUpperCase();
+  const cargoRaw = sp.get("cargo")?.trim().toUpperCase();
+
+  const validVehicles: VehicleCategoryCode[] = [
+    "AMBULANCE_4X4",
+    "PICKUP_4X4",
+    "LIGHT_TRUCK",
+    "HEAVY_TRAILER",
+    "MOTORCYCLE",
+  ];
+  const validCargos: CargoType[] = [
+    "MEDICAL_PATIENT",
+    "MEDICAL_SUPPLIES",
+    "PERISHABLE_AGRI",
+  ];
+
+  return {
+    region: regionRaw && /^PE-[A-Z]{2,4}$/.test(regionRaw) ? regionRaw : "PE-HUC",
+    origin: originRaw,
+    dest: destRaw,
+    vehicle: validVehicles.includes(vehicleRaw as VehicleCategoryCode)
+      ? (vehicleRaw as VehicleCategoryCode)
+      : undefined,
+    cargo: validCargos.includes(cargoRaw as CargoType) ? (cargoRaw as CargoType) : undefined,
+  };
+}
+
 export function App({ initialFeatures }: AppProps) {
   const searchInputId = useId();
+  const initialDeepLink = useMemo(() => readInitialDeepLink(), []);
 
   const [features, setFeatures] = useState<CorridorSegmentFeature[]>(initialFeatures ?? []);
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(
@@ -175,7 +235,7 @@ export function App({ initialFeatures }: AppProps) {
 
   const [territorialUnits, setTerritorialUnits] = useState<TerritorialUnit[]>([]);
   const [roadNodes, setRoadNodes] = useState<RoadNodeItem[]>([]);
-  const [selectedRegionCode, setSelectedRegionCode] = useState<string>("PE-HUC");
+  const [selectedRegionCode, setSelectedRegionCode] = useState<string>(initialDeepLink.region);
   const [selectedProvinceUnitId, setSelectedProvinceUnitId] = useState<string>("");
   const [selectedDistrictUnitId, setSelectedDistrictUnitId] = useState<string>("");
   const [loadingMap, setLoadingMap] = useState(false);
@@ -189,8 +249,10 @@ export function App({ initialFeatures }: AppProps) {
   const [searchFocused, setSearchFocused] = useState(false);
   const [flyToTarget, setFlyToTarget] = useState<FlyToTarget | null>(null);
   const [routeOverlay, setRouteOverlay] = useState<RouteOverlayData | null>(null);
-  const [quickOriginNodeId, setQuickOriginNodeId] = useState<string | null>(null);
-  const [quickDestNodeId, setQuickDestNodeId] = useState<string | null>(null);
+  const [quickOriginNodeId, setQuickOriginNodeId] = useState<string | null>(
+    initialDeepLink.origin
+  );
+  const [quickDestNodeId, setQuickDestNodeId] = useState<string | null>(initialDeepLink.dest);
   const [certifyingSegment, setCertifyingSegment] = useState(false);
 
   const [forecastHorizon, setForecastHorizon] = useState<0 | 24 | 48 | 72>(0);
@@ -200,6 +262,10 @@ export function App({ initialFeatures }: AppProps) {
   const [sseLive, setSseLive] = useState(false);
   const [kioskMode, setKioskMode] = useState(false);
   const [kioskAnalytics, setKioskAnalytics] = useState<AnalyticsSummaryResponse | null>(null);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [telemetryActive, setTelemetryActive] = useState(false);
+  const [telemetryCount, setTelemetryCount] = useState(0);
+  const telemetryBufferRef = useRef<TelemetryPingItem[]>([]);
 
   const mountedRef = useRef(true);
 
@@ -382,11 +448,50 @@ export function App({ initialFeatures }: AppProps) {
       setThemePreference(pref);
       setSystemScheme(sys);
     });
+    const onBeforeInstall = (e: Event) => {
+      e.preventDefault();
+      setInstallPrompt(e as BeforeInstallPromptEvent);
+    };
+    const onAppInstalled = () => setInstallPrompt(null);
+    window.addEventListener("beforeinstallprompt", onBeforeInstall);
+    window.addEventListener("appinstalled", onAppInstalled);
+
     return () => {
       cleanupAria();
       unsubscribeTheme();
+      window.removeEventListener("beforeinstallprompt", onBeforeInstall);
+      window.removeEventListener("appinstalled", onAppInstalled);
     };
   }, []);
+
+  const performSilentRefresh = useCallback(async (): Promise<string | null> => {
+    if (!refreshToken) return null;
+    try {
+      const refreshed = await postAuthRefresh(refreshToken, getOrCreateDeviceId());
+      if (!mountedRef.current) return null;
+      writeStoredToken("paradixe_access_token", refreshed.access_token);
+      writeStoredToken("paradixe_refresh_token", refreshed.refresh_token);
+      setAuthToken(refreshed.access_token);
+      setRefreshToken(refreshed.refresh_token);
+      return refreshed.access_token;
+    } catch {
+      clearSession();
+      return null;
+    }
+  }, [refreshToken, clearSession]);
+
+  useEffect(() => {
+    configureAuthRefreshHandler(refreshToken ? performSilentRefresh : null);
+    return () => configureAuthRefreshHandler(null);
+  }, [refreshToken, performSilentRefresh]);
+
+  useEffect(() => {
+    if (!refreshToken || !isOnline || initialFeatures) return;
+    const id = window.setInterval(() => {
+      void performSilentRefresh();
+    }, 12 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, [refreshToken, isOnline, initialFeatures, performSilentRefresh]);
 
   useEffect(() => {
     let cancelled = false;
@@ -511,6 +616,67 @@ export function App({ initialFeatures }: AppProps) {
     };
   }, [kioskMode, selectedRegionCode, isOnline]);
 
+  useEffect(() => {
+    if (!telemetryActive || !authToken || !isOnline || !ephemeralRecord) return;
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setTelemetryActive(false);
+      pushToast("Este dispositivo no soporta geolocalización continua.");
+      return;
+    }
+
+    const flushPings = async () => {
+      const pending = telemetryBufferRef.current.splice(0, 20);
+      if (pending.length === 0) return;
+      try {
+        const res = await postTelemetryPings(
+          {
+            client_ephemeral_id: ephemeralRecord.client_ephemeral_id,
+            ephemeral_id_date_utc: ephemeralRecord.ephemeral_id_date_utc,
+            pings: pending,
+          },
+          authToken
+        );
+        if (mountedRef.current && res.accepted > 0) {
+          setTelemetryCount((c) => c + res.accepted);
+        }
+      } catch {
+        // Descarta silenciosamente en fallo temporal de red
+      }
+    };
+
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const speedKmh =
+          typeof pos.coords.speed === "number" && pos.coords.speed >= 0
+            ? Math.round(pos.coords.speed * 3.6 * 10) / 10
+            : 25;
+        telemetryBufferRef.current.push({
+          client_ping_uuid: crypto.randomUUID(),
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          speed_kmh: speedKmh,
+          recorded_at: new Date().toISOString(),
+        });
+        if (telemetryBufferRef.current.length >= 3) {
+          void flushPings();
+        }
+      },
+      () => {
+        if (mountedRef.current) setTelemetryActive(false);
+      },
+      { enableHighAccuracy: true, maximumAge: 10000 }
+    );
+
+    const timer = window.setInterval(() => {
+      void flushPings();
+    }, 15000);
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+      window.clearInterval(timer);
+    };
+  }, [telemetryActive, authToken, isOnline, ephemeralRecord, pushToast]);
+
   const handleLocateOriginCoords = useCallback(
     (lon: number, lat: number) => {
       let bestNodeId: string | null = null;
@@ -562,11 +728,45 @@ export function App({ initialFeatures }: AppProps) {
   };
 
   const handleLogout = async () => {
+    setTelemetryActive(false);
+    setTelemetryCount(0);
+    telemetryBufferRef.current = [];
     if (authToken && refreshToken) {
       await postAuthLogout(refreshToken, getOrCreateDeviceId(), authToken).catch(() => {});
     }
     clearSession();
     pushToast("Sesión cerrada.");
+  };
+
+  const buildShareUrl = useCallback(
+    (params: {
+      origin: string;
+      dest: string;
+      vehicle: VehicleCategoryCode;
+      cargo: CargoType;
+    }) => {
+      const originBase =
+        typeof window !== "undefined" ? `${window.location.origin}/` : "https://paradixe.local/";
+      const sp = new URLSearchParams({
+        region: selectedRegionCode,
+        origin: params.origin,
+        dest: params.dest,
+        vehicle: params.vehicle,
+        cargo: params.cargo,
+      });
+      return `${originBase}?${sp.toString()}`;
+    },
+    [selectedRegionCode]
+  );
+
+  const handleTriggerInstall = async () => {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    const res = await installPrompt.userChoice.catch(() => ({ outcome: "dismissed" }));
+    if (res.outcome === "accepted") {
+      setInstallPrompt(null);
+      pushToast("Aplicación instalada.");
+    }
   };
 
   const handleSelectRegion = (code: string) => {
@@ -679,7 +879,11 @@ export function App({ initialFeatures }: AppProps) {
           authToken={authToken}
           externalOriginNodeId={quickOriginNodeId}
           externalDestinationNodeId={quickDestNodeId}
+          initialVehicle={initialDeepLink.vehicle}
+          initialCargo={initialDeepLink.cargo}
           onRouteComputed={setRouteOverlay}
+          onBuildShareUrl={buildShareUrl}
+          onToast={pushToast}
         />
       ),
     },
@@ -734,17 +938,19 @@ export function App({ initialFeatures }: AppProps) {
       icon: <IconBridge size={14} />,
       badge: bridgesOperations?.bridges.length ?? 0,
       content: (
-        <BridgesPanel
-          operations={bridgesOperations}
-          incidents={incidents}
-          nodes={roadNodes}
-          isOnline={isOnline}
-          authToken={authToken}
-          userRole={currentUser?.role_code ?? null}
-          onOpenAuthModal={() => setAuthModalOpen(true)}
-          onRefreshOperations={refreshOperations}
-          onToast={pushToast}
-        />
+        <Suspense fallback={<div className="panel-loading-skeleton">Cargando puentes...</div>}>
+          <BridgesPanel
+            operations={bridgesOperations}
+            incidents={incidents}
+            nodes={roadNodes}
+            isOnline={isOnline}
+            authToken={authToken}
+            userRole={currentUser?.role_code ?? null}
+            onOpenAuthModal={() => setAuthModalOpen(true)}
+            onRefreshOperations={refreshOperations}
+            onToast={pushToast}
+          />
+        </Suspense>
       ),
     },
     {
@@ -752,14 +958,16 @@ export function App({ initialFeatures }: AppProps) {
       label: "Simulador",
       icon: <IconSparkles size={14} />,
       content: (
-        <SimulatorPanel
-          isOnline={isOnline}
-          authToken={authToken}
-          userRole={currentUser?.role_code ?? null}
-          onOpenAuthModal={() => setAuthModalOpen(true)}
-          onToast={pushToast}
-          onVisualizeSimulation={setRouteOverlay}
-        />
+        <Suspense fallback={<div className="panel-loading-skeleton">Cargando simulador...</div>}>
+          <SimulatorPanel
+            isOnline={isOnline}
+            authToken={authToken}
+            userRole={currentUser?.role_code ?? null}
+            onOpenAuthModal={() => setAuthModalOpen(true)}
+            onToast={pushToast}
+            onVisualizeSimulation={setRouteOverlay}
+          />
+        </Suspense>
       ),
     },
   ];
@@ -808,7 +1016,7 @@ export function App({ initialFeatures }: AppProps) {
           <div className="brand-title-wrap">
             <h1 className="brand-title">PARADIXE</h1>
             <span
-              className={`conn-pill ${isOnline ? "conn-pill--online" : "conn-pill--offline"}`}
+              className={`conn-pill ${isOnline ? "conn-pill--online" : "conn-pill--offline"}${sseLive ? " conn-pill--live" : ""}`}
             >
               {isOnline ? (sseLive ? "En vivo · SSE" : "En vivo") : "Offline"}
             </span>
@@ -888,6 +1096,43 @@ export function App({ initialFeatures }: AppProps) {
         </div>
 
         <nav className="primary-nav" aria-label="Acciones principales">
+          {installPrompt && (
+            <button
+              type="button"
+              className="btn btn--sm"
+              onClick={() => void handleTriggerInstall()}
+            >
+              <IconSmartphone size={14} />
+              <span>Instalar</span>
+            </button>
+          )}
+
+          {authToken && (
+            <button
+              type="button"
+              className={`btn btn--sm${telemetryActive ? " btn--gps-active" : ""}`}
+              aria-pressed={telemetryActive}
+              onClick={() => {
+                setTelemetryActive((v) => {
+                  const next = !v;
+                  pushToast(
+                    next
+                      ? "Telemetría GPS anónima iniciada (ID diario rotativo)."
+                      : "Telemetría GPS detenida."
+                  );
+                  return next;
+                });
+              }}
+            >
+              <IconNavigation size={14} />
+              <span>
+                {telemetryActive
+                  ? `GPS (${telemetryCount})`
+                  : "GPS"}
+              </span>
+            </button>
+          )}
+
           <button
             type="button"
             className="btn btn--primary btn--sm"
@@ -1039,6 +1284,16 @@ export function App({ initialFeatures }: AppProps) {
           aria-label="Panel de navegación y rutas"
         >
           <div className="drawer-surface">
+            <button
+              type="button"
+              className="mobile-sheet-grabber"
+              aria-expanded={drawerOpen}
+              aria-label={drawerOpen ? "Contraer panel inferior" : "Desplegar panel inferior"}
+              onClick={() => setDrawerOpen((v) => !v)}
+            >
+              <span className="mobile-grabber-bar" aria-hidden="true" />
+              <span>{drawerOpen ? "Ocultar panel" : "Abrir rutas y alertas"}</span>
+            </button>
             <OperationalTabs
               tabs={operationalTabs}
               activeTabId={activeTabId}
@@ -1145,10 +1400,32 @@ export function App({ initialFeatures }: AppProps) {
           </div>
 
           <div className="ops-actions-row" style={{ marginBlockStart: "0.45rem" }}>
+            <button
+              type="button"
+              className="btn btn--sm"
+              onClick={() => {
+                const url = buildShareUrl({
+                  origin: selectedFeature.properties.origin_node_id,
+                  dest: selectedFeature.properties.destination_node_id,
+                  vehicle: initialDeepLink.vehicle ?? "AMBULANCE_4X4",
+                  cargo: initialDeepLink.cargo ?? "MEDICAL_PATIENT",
+                });
+                void navigator.clipboard?.writeText(url);
+                pushToast("Enlace del tramo copiado.");
+              }}
+            >
+              <IconCopy size={14} />
+              <span>Enlace</span>
+            </button>
             <a
               className="btn btn--sm"
               href={`https://wa.me/?text=${encodeURIComponent(
-                `PARADIXE SOFT · ${selectedFeature.properties.corridor_name} (${PASSABILITY_HUMAN[selectedFeature.properties.passability_state]}, IVV ${selectedFeature.properties.ivv_score?.toFixed(0) ?? "N/A"}).`
+                `PARADIXE SOFT · ${selectedFeature.properties.corridor_name} (${PASSABILITY_HUMAN[selectedFeature.properties.passability_state]}, IVV ${selectedFeature.properties.ivv_score?.toFixed(0) ?? "N/A"}). ${buildShareUrl({
+                  origin: selectedFeature.properties.origin_node_id,
+                  dest: selectedFeature.properties.destination_node_id,
+                  vehicle: initialDeepLink.vehicle ?? "AMBULANCE_4X4",
+                  cargo: initialDeepLink.cargo ?? "MEDICAL_PATIENT",
+                })}`
               )}`}
               target="_blank"
               rel="noopener noreferrer"
@@ -1266,6 +1543,7 @@ export function App({ initialFeatures }: AppProps) {
         queuedCount={queuedReports.length}
         ephemeralRecord={ephemeralRecord}
         authToken={authToken}
+        userRole={currentUser?.role_code ?? null}
         isOnline={isOnline}
         regions={territorialUnits}
         selectedRegionCode={selectedRegionCode}

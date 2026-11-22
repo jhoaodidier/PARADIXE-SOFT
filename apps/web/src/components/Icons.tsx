@@ -432,3 +432,40 @@ export function IconTrash(props: IconProps) {
     </Svg>
   );
 }
+
+export function IconCopy(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </Svg>
+  );
+}
+
+export function IconKey(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <circle cx="8" cy="15" r="4" />
+      <path d="m11 12 8.5-8.5" />
+      <path d="m16 7 2 2" />
+      <path d="m18.5 4.5 2 2" />
+    </Svg>
+  );
+}
+
+export function IconNavigation(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <polygon points="12 3 19 20 12 16 5 20 12 3" />
+    </Svg>
+  );
+}
+
+export function IconSmartphone(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="6.5" y="2.5" width="11" height="19" rx="2" />
+      <path d="M12 18h.01" />
+    </Svg>
+  );
+}

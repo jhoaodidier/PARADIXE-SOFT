@@ -328,6 +328,24 @@ strong,
   color: var(--status-green);
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  .conn-pill--live::before {
+    animation: sse-live-pulse 2.2s ease-in-out infinite;
+  }
+}
+
+@keyframes sse-live-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.38);
+    opacity: 0.65;
+  }
+}
+
 .conn-pill--offline {
   color: var(--status-amber);
 }
@@ -553,6 +571,7 @@ strong,
   background-color: var(--surface-glass);
   backdrop-filter: blur(22px) saturate(1.55);
   box-shadow: var(--shadow-float);
+  contain: layout style paint;
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -948,7 +967,7 @@ progress.ivv-meter::-moz-progress-bar {
 
 .panel-title {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: clamp(1rem, 0.92rem + 0.35vw, 1.18rem);
   font-weight: 700;
   letter-spacing: -0.015em;
 }
@@ -1977,10 +1996,29 @@ dialog.modal-dialog::backdrop {
    ============================================================================ */
 @media (max-width: 820px) {
   .floating-topbar {
-    inset-block-start: 0.5rem;
-    inset-inline: 0.5rem;
-    padding: 0.45rem 0.6rem;
-    gap: 0.45rem;
+    inset-block-start: 0.45rem;
+    inset-inline: 0.45rem;
+    padding: 0.45rem 0.55rem;
+    gap: 0.38rem 0.45rem;
+  }
+
+  .primary-nav {
+    order: 2;
+    flex: 1 1 100%;
+    justify-content: space-between;
+    gap: 0.3rem;
+  }
+
+  .primary-nav .btn--sm {
+    min-block-size: 34px;
+    padding: 0.28rem 0.56rem;
+    font-size: 0.76rem;
+  }
+
+  .primary-nav .icon-btn {
+    min-inline-size: 34px;
+    min-block-size: 34px;
+    padding: 0.35rem;
   }
 
   .topbar-search-wrap {
@@ -1989,29 +2027,87 @@ dialog.modal-dialog::backdrop {
     max-inline-size: none;
   }
 
+  .mobile-sheet-grabber {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    inline-size: 100%;
+    min-block-size: 40px;
+    padding: 0.25rem 0.5rem 0.45rem;
+    border: 0;
+    border-block-end: 1px solid var(--border-subtle);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.74rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .mobile-grabber-bar {
+    inline-size: 2.4rem;
+    block-size: 0.24rem;
+    border-radius: var(--radius-pill);
+    background-color: var(--border-strong);
+  }
+
   .floating-drawer {
     inset-block-start: auto;
     inset-block-end: 0.5rem;
     inset-inline: 0.5rem;
     inline-size: auto;
-    max-block-size: 48dvh;
+    max-block-size: 43dvh;
   }
 
   .floating-drawer.is-collapsed {
-    transform: translateY(calc(100% - 3rem));
+    transform: translateY(calc(100% - 3.6rem));
+  }
+
+  .drawer-collapse-handle {
+    display: none;
   }
 
   .floating-inspector {
+    inset-block-start: auto;
+    inset-block-end: 4.5rem;
+    inset-inline: 0.5rem;
+    inline-size: auto;
+    z-index: 24;
+  }
+
+  .floating-drawer:not(.is-collapsed) ~ .floating-inspector {
     display: none;
   }
 
   .map-dock-bottom-center {
+    inset-block-end: calc(44.5dvh + 2.85rem);
+    inset-inline-start: 0.5rem;
+    inset-inline-end: auto;
+    transform: none;
+    gap: 0.35rem;
+  }
+
+  .map-dock-bottom-center .map-legend-pill,
+  .map-dock-bottom-center .map-dock-pill {
     display: none;
   }
 
+  .map-dock-bottom-center .forecast-pill-btn {
+    min-block-size: 28px;
+    padding: 0.2rem 0.5rem;
+    font-size: 0.72rem;
+  }
+
   .map-dock-bottom-right {
-    inset-block-end: 51dvh;
-    inset-inline-end: 0.6rem;
+    inset-block-end: 44.5dvh;
+    inset-inline-end: 0.5rem;
+  }
+
+  .map-dock-bottom-right .map-dock-pill {
+    min-block-size: 38px;
+    padding: 0.35rem 0.72rem;
+    font-size: 0.78rem;
   }
 }
 
@@ -2170,6 +2266,140 @@ dialog.modal-dialog--wide {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  contain: layout style paint;
+}
+
+.mobile-sheet-grabber {
+  display: none;
+}
+
+.ops-list-item,
+.offline-pack-row {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 5.5rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .btn,
+  .choice-card,
+  .corridor-quick-btn {
+    transition: transform 0.16s ease-out, background-color 0.16s ease-out, border-color 0.16s ease-out;
+  }
+
+  .btn--primary:not(:disabled):hover,
+  .choice-card:hover,
+  .corridor-quick-btn:hover {
+    transform: translateY(-1px);
+  }
+}
+
+.btn--gps-active {
+  background-color: var(--status-green-bg);
+  color: var(--status-green);
+  border-color: color-mix(in oklab, var(--status-green) 42%, transparent);
+}
+
+.stop-dot--via {
+  background-color: var(--status-amber);
+}
+
+.evidence-thumb-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-block: 0.35rem 0.5rem;
+}
+
+.evidence-thumb-btn {
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-well);
+  overflow: hidden;
+  cursor: zoom-in;
+}
+
+.evidence-list-thumb {
+  display: block;
+  inline-size: 72px;
+  block-size: 54px;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
+dialog.modal-dialog--lightbox {
+  inline-size: min(94dvw, 760px);
+}
+
+.lightbox-full-img {
+  display: block;
+  inline-size: 100%;
+  max-block-size: 68dvh;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  background-color: var(--surface-well);
+}
+
+.route-hops-list {
+  margin: 0.5rem 0 0;
+  padding-inline-start: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+}
+
+.route-hop-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.route-hop-name {
+  font-weight: 600;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.route-hop-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--text-muted);
+  flex: none;
+}
+
+.key-secret-callout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.6rem 0.75rem;
+  margin-block-end: 0.65rem;
+  border-radius: var(--radius-md);
+  background-color: var(--status-green-bg);
+  border: 1px solid color-mix(in oklab, var(--status-green) 35%, transparent);
+  font-size: 0.78rem;
+}
+
+.key-secret-callout strong {
+  display: block;
+  margin-block-end: 0.2rem;
+}
+
+.key-secret-callout code {
+  word-break: break-all;
+}
+
+.panel-loading-skeleton {
+  padding: 1.5rem 1rem;
+  text-align: center;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--text-muted);
 }
 
 @media print {

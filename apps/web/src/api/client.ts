@@ -119,6 +119,7 @@ export interface IncidentListItem {
   detected_at: string;
   confirmed_at: string | null;
   resolved_at: string | null;
+  evidence_photos?: string[];
 }
 
 export interface IncidentsListResponse {
@@ -297,23 +298,74 @@ function getBaseUrl(): string {
     : DEFAULT_BASE_URL;
 }
 
+type RefreshSessionHandler = () => Promise<string | null>;
+
+let authRefreshHandler: RefreshSessionHandler | null = null;
+let inFlightRefresh: Promise<string | null> | null = null;
+
+export function configureAuthRefreshHandler(handler: RefreshSessionHandler | null): void {
+  authRefreshHandler = handler;
+}
+
+async function performAuthorizedFetch(
+  path: string,
+  init: RequestInit,
+  token: string | null | undefined,
+  allowRefresh: boolean
+): Promise<Response> {
+  const buildHeaders = (activeToken: string | null | undefined): Headers => {
+    const h = new Headers(init.headers);
+    if (activeToken) {
+      h.set("Authorization", `Bearer ${activeToken}`);
+    }
+    return h;
+  };
+
+  let response = await fetch(`${getBaseUrl()}${path}`, {
+    ...init,
+    headers: buildHeaders(token),
+  });
+
+  if (
+    response.status === 401 &&
+    allowRefresh &&
+    token &&
+    authRefreshHandler &&
+    !path.startsWith("/auth/")
+  ) {
+    if (!inFlightRefresh) {
+      inFlightRefresh = authRefreshHandler().finally(() => {
+        inFlightRefresh = null;
+      });
+    }
+    const freshToken = await inFlightRefresh;
+    if (freshToken) {
+      response = await fetch(`${getBaseUrl()}${path}`, {
+        ...init,
+        headers: buildHeaders(freshToken),
+      });
+    }
+  }
+
+  return response;
+}
+
 async function requestJson<T>(
   path: string,
-  options: RequestInit & { token?: string | null } = {}
+  options: RequestInit & { token?: string | null; skipRefresh?: boolean } = {}
 ): Promise<T> {
-  const { token, headers, ...rest } = options;
+  const { token, headers, skipRefresh = false, ...rest } = options;
   const finalHeaders = new Headers(headers);
   if (!finalHeaders.has("Content-Type") && rest.body) {
     finalHeaders.set("Content-Type", "application/json");
   }
-  if (token) {
-    finalHeaders.set("Authorization", `Bearer ${token}`);
-  }
 
-  const response = await fetch(`${getBaseUrl()}${path}`, {
-    ...rest,
-    headers: finalHeaders,
-  });
+  const response = await performAuthorizedFetch(
+    path,
+    { ...rest, headers: finalHeaders },
+    token,
+    !skipRefresh
+  );
 
   if (!response.ok) {
     let payload: Partial<ApiError> | undefined;
@@ -680,14 +732,18 @@ export async function postUploadEvidence(
   blob: Blob,
   token: string
 ): Promise<EvidenceUploadResponse> {
-  const response = await fetch(`${getBaseUrl()}/uploads/evidence`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": blob.type || "image/jpeg",
+  const response = await performAuthorizedFetch(
+    "/uploads/evidence",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": blob.type || "image/jpeg",
+      },
+      body: blob,
     },
-    body: blob,
-  });
+    token,
+    true
+  );
   if (!response.ok) {
     let payload: Partial<ApiError> | undefined;
     try {
@@ -845,6 +901,218 @@ export function postSubscription(
 export function deleteSubscription(subscriptionId: string, token: string): Promise<void> {
   return requestJson<void>(`/subscriptions/${subscriptionId}`, {
     method: "DELETE",
+    token,
+  });
+}
+
+export interface AdminUserItem {
+  user_id: string;
+  phone_e164: string;
+  full_name: string;
+  role_code: RoleCode;
+  reputation_score: number;
+  is_active: boolean;
+  created_at: string;
+}
+
+export function fetchAdminUsers(token: string): Promise<{ users: AdminUserItem[] }> {
+  return requestJson<{ users: AdminUserItem[] }>("/admin/users", {
+    method: "GET",
+    token,
+  });
+}
+
+export function postAdminUser(
+  body: {
+    phone_e164: string;
+    full_name: string;
+    password: string;
+    role_code: RoleCode;
+  },
+  token: string
+): Promise<AdminUserItem> {
+  return requestJson<AdminUserItem>("/admin/users", {
+    method: "POST",
+    body: JSON.stringify(body),
+    token,
+  });
+}
+
+export interface TelemetryPingItem {
+  client_ping_uuid: string;
+  latitude: number;
+  longitude: number;
+  speed_kmh: number;
+  recorded_at: string;
+}
+
+export interface TelemetryIngestRequest {
+  client_ephemeral_id: string;
+  ephemeral_id_date_utc: string;
+  pings: TelemetryPingItem[];
+}
+
+export interface TelemetryIngestResponse {
+  accepted: number;
+  expired: number;
+  duplicates: number;
+  server_time: string;
+}
+
+export function postTelemetryPings(
+  body: TelemetryIngestRequest,
+  token: string
+): Promise<TelemetryIngestResponse> {
+  return requestJson<TelemetryIngestResponse>("/telemetry/pings", {
+    method: "POST",
+    body: JSON.stringify(body),
+    token,
+  });
+}
+
+export interface B2bApiKeyItem {
+  api_key_id: string;
+  organization_name: string;
+  key_prefix: string;
+  role_code: RoleCode;
+  rate_limit_rpm: number;
+  is_active: boolean;
+  last_used_at: string | null;
+  created_at: string;
+  revoked_at: string | null;
+}
+
+export interface CreateApiKeyResponse {
+  api_key_id: string;
+  organization_name: string;
+  key_prefix: string;
+  raw_api_key: string;
+  role_code: RoleCode;
+  rate_limit_rpm: number;
+  created_at: string;
+}
+
+export function fetchB2bApiKeys(token: string): Promise<{ api_keys: B2bApiKeyItem[] }> {
+  return requestJson<{ api_keys: B2bApiKeyItem[] }>("/b2b/api-keys", {
+    method: "GET",
+    token,
+  });
+}
+
+export function postB2bApiKey(
+  body: {
+    organization_name: string;
+    role_code?: RoleCode;
+    rate_limit_rpm?: number;
+  },
+  token: string
+): Promise<CreateApiKeyResponse> {
+  return requestJson<CreateApiKeyResponse>("/b2b/api-keys", {
+    method: "POST",
+    body: JSON.stringify(body),
+    token,
+  });
+}
+
+export function deleteB2bApiKey(apiKeyId: string, token: string): Promise<void> {
+  return requestJson<void>(`/b2b/api-keys/${apiKeyId}`, {
+    method: "DELETE",
+    token,
+  });
+}
+
+export interface B2bWebhookItem {
+  webhook_id: string;
+  organization_name: string;
+  target_url: string;
+  masked_secret: string;
+  region_iso: string | null;
+  min_risk_level: "AMBER" | "RED" | "BLOCKED";
+  is_active: boolean;
+  last_delivery_status: number | null;
+  last_delivered_at: string | null;
+  created_at: string;
+}
+
+export interface CreateWebhookResponse {
+  webhook_id: string;
+  organization_name: string;
+  target_url: string;
+  signing_secret: string;
+  region_iso: string | null;
+  min_risk_level: "AMBER" | "RED" | "BLOCKED";
+  created_at: string;
+}
+
+export function fetchB2bWebhooks(token: string): Promise<{ webhooks: B2bWebhookItem[] }> {
+  return requestJson<{ webhooks: B2bWebhookItem[] }>("/b2b/webhooks", {
+    method: "GET",
+    token,
+  });
+}
+
+export function postB2bWebhook(
+  body: {
+    organization_name: string;
+    target_url: string;
+    region_iso?: string | null;
+    min_risk_level?: "AMBER" | "RED" | "BLOCKED";
+  },
+  token: string
+): Promise<CreateWebhookResponse> {
+  return requestJson<CreateWebhookResponse>("/b2b/webhooks", {
+    method: "POST",
+    body: JSON.stringify(body),
+    token,
+  });
+}
+
+export function deleteB2bWebhook(webhookId: string, token: string): Promise<void> {
+  return requestJson<void>(`/b2b/webhooks/${webhookId}`, {
+    method: "DELETE",
+    token,
+  });
+}
+
+export interface MultiStopRoutingRequest {
+  stop_node_ids: string[];
+  vehicle_category_code: VehicleCategoryCode;
+  cargo_type: CargoType;
+  cargo_payload_kg?: number;
+  patient_count?: number;
+}
+
+export interface MultiStopLegDto {
+  leg_index: number;
+  origin_node_id: string;
+  destination_node_id: string;
+  resolution: RoutingCalculateResponse;
+}
+
+export interface MultiStopRoutingResponse {
+  overall_status: "COMPLETE" | "PARTIAL_BRIDGE_REQUIRED" | "NO_SAFE_ROUTE" | string;
+  blocking_reason_code?: NoSafeRouteReasonCode | null;
+  total_distance_km: number;
+  estimated_time_min: number;
+  max_ivv_on_route: number;
+  economic_impact?: {
+    estimated_co2_kg: number;
+    baseline_blockage_co2_kg: number;
+    co2_delta_kg: number;
+    estimated_cargo_loss_avoided_usd: number;
+    time_saved_vs_blockage_min: number;
+    reference_blockage_hours: number;
+  } | null;
+  legs: MultiStopLegDto[];
+}
+
+export function postMultiStopRouting(
+  body: MultiStopRoutingRequest,
+  token?: string | null
+): Promise<MultiStopRoutingResponse> {
+  return requestJson<MultiStopRoutingResponse>("/routing/multi-stop", {
+    method: "POST",
+    body: JSON.stringify(body),
     token,
   });
 }

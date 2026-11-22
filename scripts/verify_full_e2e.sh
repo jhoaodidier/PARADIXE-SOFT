@@ -112,11 +112,13 @@ print("[PASS] GET /api/v1/analytics/summary -> region=%s, total_segments=%s, cer
 # 2. Registro de conductor (DRIVER) con teléfono E.164 dinámico
 RAND_SUFFIX="$(date +%s | tail -c 6)"
 DRIVER_PHONE="+519629${RAND_SUFFIX}"
-DRIVER_TOKEN="$(http_req "201" "${API_BASE}/api/v1/auth/register" \
+DRIVER_DEV="e2e-driver-${RAND_SUFFIX}"
+REG_JSON="$(http_req "201" "${API_BASE}/api/v1/auth/register" \
   -X POST -H "Content-Type: application/json" \
-  -d "{\"phone_e164\":\"${DRIVER_PHONE}\",\"full_name\":\"Conductor E2E ${RAND_SUFFIX}\",\"password\":\"ParadixeE2E2026!\",\"device_id\":\"e2e-driver-${RAND_SUFFIX}\"}" \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')"
-[[ -n "$DRIVER_TOKEN" ]]
+  -d "{\"phone_e164\":\"${DRIVER_PHONE}\",\"full_name\":\"Conductor E2E ${RAND_SUFFIX}\",\"password\":\"ParadixeE2E2026!\",\"device_id\":\"${DRIVER_DEV}\"}")"
+DRIVER_TOKEN="$(printf '%s' "$REG_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')"
+DRIVER_REFRESH="$(printf '%s' "$REG_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["refresh_token"])')"
+[[ -n "$DRIVER_TOKEN" && -n "$DRIVER_REFRESH" ]]
 echo "[PASS] POST /api/v1/auth/register (201 Created, DRIVER JWT emitido)"
 
 # 3. Login COER_ADMIN y listado RBAC /admin/users
@@ -332,5 +334,168 @@ d = json.load(sys.stdin)
 assert d["accepted"] is True, d
 print("[PASS] paradixe-messaging simulate-webhook OK (accepted=%s, reply=%s)" % (d["accepted"], d["reply_preview"]))
 '
+
+# 11. Ruteo macro-regional certificado en Junín (PE-JUN)
+JUN_ROW="$(psql "$DATABASE_URL" -t -A -F '|' -c "
+SELECT rs.origin_node_id, rs.destination_node_id
+FROM road_segments rs
+JOIN territorial_units tu ON ST_Intersects(rs.geom, tu.bbox_geom) AND tu.iso_code = 'PE-JUN'
+JOIN LATERAL (
+    SELECT ia.ivv_score, ia.calculated_at
+    FROM weather_observations wo
+    JOIN ivv_assessments ia ON ia.observation_id = wo.observation_id
+    WHERE wo.segment_id = rs.segment_id
+    ORDER BY ia.calculated_at DESC LIMIT 1
+) ivv ON TRUE
+WHERE rs.surface_type = 'PAVED'
+  AND rs.attributes_verified_at IS NOT NULL
+  AND rs.is_topology_verified = TRUE
+  AND rs.road_width_m >= 3.5
+  AND rs.max_slope_forward_pct <= 12.0
+  AND rs.max_supported_tons >= 3.5
+  AND ivv.ivv_score < 70
+  AND ivv.calculated_at >= NOW() - INTERVAL '2 hours'
+  AND NOT EXISTS (
+      SELECT 1 FROM incidents i WHERE i.segment_id = rs.segment_id AND i.resolved_at IS NULL
+  )
+LIMIT 1;
+")"
+IFS='|' read -r JUN_ORIG JUN_DEST <<< "$JUN_ROW"
+[[ -n "$JUN_ORIG" ]] || { echo "[FAIL] No se encontró tramo PAVED certificado en PE-JUN"; exit 1; }
+
+http_req "200" "${API_BASE}/api/v1/routing/calculate" \
+  -X POST \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"origin_node_id\":\"${JUN_ORIG}\",\"destination_node_id\":\"${JUN_DEST}\",\"vehicle_category_code\":\"PICKUP_4X4\",\"cargo_type\":\"PERISHABLE_AGRI\",\"cargo_payload_kg\":800}" \
+  | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["resolution_type"] == "ALTERNATE_ROUTE", d
+print("[PASS] PE-JUN ruteo interregional certificado -> ALTERNATE_ROUTE (dist=%s km)" % d["total_distance_km"])
+'
+
+# 12. Ruteo multi-parada (cadena de 3 nodos verificados en PE-HUC)
+CHAIN_ROW="$(psql "$DATABASE_URL" -t -A -F '|' -c "
+SELECT s1.origin_node_id, s1.destination_node_id, s2.destination_node_id
+FROM road_segments s1
+JOIN road_segments s2 ON s2.origin_node_id = s1.destination_node_id
+JOIN territorial_units tu ON ST_Intersects(s1.geom, tu.bbox_geom) AND tu.iso_code = 'PE-HUC'
+JOIN LATERAL (
+    SELECT ia.ivv_score, ia.calculated_at FROM weather_observations wo JOIN ivv_assessments ia ON ia.observation_id = wo.observation_id
+    WHERE wo.segment_id = s1.segment_id ORDER BY ia.calculated_at DESC LIMIT 1
+) i1 ON TRUE
+JOIN LATERAL (
+    SELECT ia.ivv_score, ia.calculated_at FROM weather_observations wo JOIN ivv_assessments ia ON ia.observation_id = wo.observation_id
+    WHERE wo.segment_id = s2.segment_id ORDER BY ia.calculated_at DESC LIMIT 1
+) i2 ON TRUE
+WHERE s1.surface_type = 'PAVED' AND s2.surface_type = 'PAVED'
+  AND s1.attributes_verified_at IS NOT NULL AND s2.attributes_verified_at IS NOT NULL
+  AND s1.is_topology_verified = TRUE AND s2.is_topology_verified = TRUE
+  AND s1.road_width_m >= 3.5 AND s2.road_width_m >= 3.5
+  AND s1.max_slope_forward_pct <= 12.0 AND s2.max_slope_forward_pct <= 12.0
+  AND s1.max_supported_tons >= 3.5 AND s2.max_supported_tons >= 3.5
+  AND s1.origin_node_id <> s2.destination_node_id
+  AND i1.ivv_score < 70 AND i2.ivv_score < 70
+  AND i1.calculated_at >= NOW() - INTERVAL '2 hours'
+  AND i2.calculated_at >= NOW() - INTERVAL '2 hours'
+  AND NOT EXISTS (SELECT 1 FROM incidents inc WHERE inc.segment_id IN (s1.segment_id, s2.segment_id) AND inc.resolved_at IS NULL)
+LIMIT 1;
+")"
+IFS='|' read -r MS_N1 MS_N2 MS_N3 <<< "$CHAIN_ROW"
+[[ -n "$MS_N1" ]] || { echo "[FAIL] No se encontró cadena de 3 nodos certificados en PE-HUC"; exit 1; }
+
+http_req "200" "${API_BASE}/api/v1/routing/multi-stop" \
+  -X POST \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"stop_node_ids\":[\"${MS_N1}\",\"${MS_N2}\",\"${MS_N3}\"],\"vehicle_category_code\":\"PICKUP_4X4\",\"cargo_type\":\"MEDICAL_SUPPLIES\",\"cargo_payload_kg\":500}" \
+  | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["overall_status"] == "COMPLETE", d
+assert len(d["legs"]) == 2, d
+print("[PASS] POST /routing/multi-stop (3 paradas, 2 tramos, dist=%s km, time=%s min)" % (d["total_distance_km"], d["estimated_time_min"]))
+'
+
+# 13. B2B API Key + Autenticación vía X-API-Key + Revocación (401)
+B2B_KEY_JSON="$(http_req "201" "${API_BASE}/api/v1/b2b/api-keys" \
+  -X POST \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"organization_name":"Flota E2E SAC","role_code":"DRIVER","rate_limit_rpm":120}')"
+B2B_KEY_ID="$(printf '%s' "$B2B_KEY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["api_key_id"])')"
+B2B_RAW_KEY="$(printf '%s' "$B2B_KEY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["raw_api_key"])')"
+[[ "$B2B_RAW_KEY" == pxk_live_* ]]
+
+http_req "200" "${API_BASE}/api/v1/b2b/corridors/status" \
+  -X POST \
+  -H "X-API-Key: ${B2B_RAW_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"region":"PE-HUC","limit":10}' \
+  | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["total_matched"] > 0, d
+print("[PASS] POST /b2b/corridors/status vía X-API-Key (%s tramos)" % d["total_matched"])
+'
+
+http_req "204" "${API_BASE}/api/v1/b2b/api-keys/${B2B_KEY_ID}" \
+  -X DELETE \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
+REVOKED_CODE="$(curl -s -o /dev/null -w "%{http_code}" -X POST "${API_BASE}/api/v1/b2b/corridors/status" \
+  -H "X-API-Key: ${B2B_RAW_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"region":"PE-HUC","limit":5}')"
+[[ "$REVOKED_CODE" == "401" ]] || { echo "[FAIL] API Key revocada devolvió HTTP $REVOKED_CODE"; exit 1; }
+echo "[PASS] B2B API Key revocada rechaza acceso (HTTP 401)"
+
+# 14. B2B Webhooks: bloqueo anti-SSRF (422) + CRUD seguro
+SSRF_CODE="$(curl -s -o /dev/null -w "%{http_code}" -X POST "${API_BASE}/api/v1/b2b/webhooks" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"organization_name":"Bad","target_url":"http://169.254.169.254/latest/meta-data/"}')"
+[[ "$SSRF_CODE" == "422" ]] || { echo "[FAIL] SSRF webhook devolvió HTTP $SSRF_CODE en lugar de 422"; exit 1; }
+
+WH_JSON="$(http_req "201" "${API_BASE}/api/v1/b2b/webhooks" \
+  -X POST \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"organization_name":"ERP Flota","target_url":"https://erp.flota.pe/hooks/paradixe","region_iso":"PE-HUC","min_risk_level":"RED"}')"
+WH_ID="$(printf '%s' "$WH_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["signing_secret"].startswith("whsec_"); print(d["webhook_id"])')"
+
+http_req "200" "${API_BASE}/api/v1/b2b/webhooks" -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); assert any(w["masked_secret"].startswith("whsec_****") for w in d["webhooks"])'
+http_req "204" "${API_BASE}/api/v1/b2b/webhooks/${WH_ID}" -X DELETE -H "Authorization: Bearer ${ADMIN_TOKEN}" >/dev/null
+echo "[PASS] B2B Webhooks SSRF 422 + CRUD secreto enmascarado OK"
+
+# 15. Telemetría GPS anónima por lotes (/telemetry/pings)
+TODAY_UTC="$(date -u +%F)"
+NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+EPHEM_UUID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+PING_UUID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+http_req "202" "${API_BASE}/api/v1/telemetry/pings" \
+  -X POST \
+  -H "Authorization: Bearer ${DRIVER_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"client_ephemeral_id\":\"${EPHEM_UUID}\",\"ephemeral_id_date_utc\":\"${TODAY_UTC}\",\"pings\":[{\"client_ping_uuid\":\"${PING_UUID}\",\"latitude\":${CERT_LAT},\"longitude\":${CERT_LON},\"speed_kmh\":42.5,\"recorded_at\":\"${NOW_ISO}\"}]}" \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["accepted"]==1, d; print("[PASS] POST /telemetry/pings (202 Accepted, accepted=%s)" % d["accepted"])'
+
+# 16. Campo evidence_photos en GET /api/v1/incidents
+http_req "200" "${API_BASE}/api/v1/incidents" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert all(isinstance(i.get("evidence_photos"), list) for i in d["incidents"]), d
+print("[PASS] GET /api/v1/incidents incluye evidence_photos (%s incidentes)" % len(d["incidents"]))
+'
+
+# 17. Logout con cabecera Clear-Site-Data
+LOGOUT_OUT="$(curl -sS -D - -o /dev/null -w "\nHTTP_CODE:%{http_code}" -X POST "${API_BASE}/api/v1/auth/logout" \
+  -H "Authorization: Bearer ${DRIVER_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"refresh_token\":\"${DRIVER_REFRESH}\",\"device_id\":\"${DRIVER_DEV}\"}")"
+printf '%s' "$LOGOUT_OUT" | grep -q "HTTP_CODE:204"
+printf '%s' "$LOGOUT_OUT" | grep -qi 'clear-site-data:.*"cookies".*"storage".*"cache"'
+echo "[PASS] POST /api/v1/auth/logout -> HTTP 204 + Clear-Site-Data"
 
 echo "[E2E] TODAS LAS VERIFICACIONES E2E PASARON CORRECTAMENTE"
