@@ -1,0 +1,37 @@
+[package]
+name = "paradixe-ingestor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Scalable Multi-Region OSM/DEM/Weather Ingestor & Native PMTiles v3 Publisher for PARADIXE SOFT"
+
+[dependencies]
+chrono.workspace = true
+clap = { version = "4", features = ["derive"] }
+dotenvy = "0.15"
+flate2 = "1.0"
+hex.workspace = true
+hmac.workspace = true
+osmpbf = "0.3"
+paradixe-domain.workspace = true
+paradixe-ivv = { path = "../paradixe-ivv" }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+rust_decimal.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx = { version = "0.8", default-features = false, features = [
+  "runtime-tokio",
+  "tls-rustls",
+  "postgres",
+  "uuid",
+  "chrono",
+  "rust_decimal",
+  "json",
+] }
+thiserror.workspace = true
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid.workspace = true

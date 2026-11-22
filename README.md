@@ -86,6 +86,7 @@ Siguiendo los **Artículos I y II SDD (*Library-First & CLI*)**, cada motor del 
 | [`paradixe-routing`](./crates/paradixe-routing) | Enrutador bidireccional Dijkstra, ventanas humanitarias y Puente Logístico (`RTE-01..04`, `BRG-01..03`). | Poda vehicular, ventanas `[entry, exit]`, precedencia diagnóstica |
 | [`paradixe-impact`](./crates/paradixe-impact) | Evaluador reproducible de tiempo, $\text{CO}_2$ y merma agrícola (`SIM-01`, `SIM-02`, `IMP-01`). | `null` en `NO_SAFE_ROUTE`, deltas negativos preservados |
 | [`paradixe-api`](./crates/paradixe-api) | API Core Axum + SQLx (22 endpoints `/api/v1`, JWT/Argon2id/OTP, `sync_control`, módulo de simulacros RO). | `SEC-01..07`, `GEO-01..03`, `SYN-01..04`, `E2E-01` sobre PostGIS |
+| [`paradixe-ingestor`](./crates/paradixe-ingestor) | Ingestor multi-región (`#![forbid(unsafe_code)]`): OSM PBF Geofabrik, NASA SRTM 30m, Open-Meteo IVV cada 3 h y `PMTiles v3` en RustFS/S3. | `PE-HUC` (11 provincias y distritos), `PE-PAS`, `PE-JUN`, `PE-UCA`, `PE-SAM`, `PE-ANC`, `PE-ALL`, `--bbox` |
 
 ### Ejemplo Ejecutable (`paradixe-ivv` CLI)
 
@@ -129,11 +130,12 @@ Salida determinista esperada: `"ivv_score": "84.00"`, `"risk_level": "RED"`.
 
 | Ruta | Descripción |
 | :--- | :--- |
-| [`crates/`](./crates) | Cargo Workspace en Rust (`paradixe-domain`, `paradixe-ivv`, `paradixe-consensus`, `paradixe-routing`, `paradixe-impact`, `paradixe-api`) |
+| [`crates/`](./crates) | Cargo Workspace en Rust (`paradixe-domain`, `paradixe-ivv`, `paradixe-consensus`, `paradixe-routing`, `paradixe-impact`, `paradixe-api`, `paradixe-ingestor`) |
 | [`apps/web/`](./apps/web) | PWA Offline-First en React + TypeScript + MapLibre GL JS + PMTiles + IndexedDB |
 | [`openapi/openapi-v1.json`](./openapi/openapi-v1.json) | Contrato OpenAPI 3.1.0 canónico (`/api/v1`, 22 rutas y esquemas discriminados) |
 | [`migrations/0001_initial_schema.sql`](./migrations/0001_initial_schema.sql) | Esquema PostgreSQL 16 + PostGIS 3.4 (27 tablas 3NF, índices `GiST ::geography`, `CHECK`s) |
 | [`migrations/0002_seed_base_catalogs.sql`](./migrations/0002_seed_base_catalogs.sql) | Semillas idempotentes (`sync_control`, roles RBAC, categorías vehiculares, versiones base) |
+| [`migrations/0003_territorial_regions_and_osm_lineage.sql`](./migrations/0003_territorial_regions_and_osm_lineage.sql) | Unidades territoriales (`territorial_units`), hidrografía (`hydrography_waterways`) y trazabilidad OSM |
 | [`docker-compose.yml`](./docker-compose.yml) | Orquestación local de PostGIS 16 y RustFS S3 en Rust (puerto 9000 / consola 9001) |
 | [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) | Pipeline CI en GitHub Actions (Rust fmt/clippy/test, PWA Vite/Vitest y migraciones PostGIS) |
 | [`docs/PARADIXE_SOFT.md`](./docs/PARADIXE_SOFT.md) | Especificación técnica ejecutable completa (`2.0.0-prod-sdd-rust`) |
@@ -180,6 +182,19 @@ docker compose up -d
 cargo test -p paradixe-api --test integration_postgis -- --ignored --test-threads=1
 ```
 
+### 5. Ingesta Territorial Multi-Región (OSM, NASA SRTM 30m, Open-Meteo IVV y PMTiles v3)
+```bash
+# Ingesta completa de Huánuco (`PE-HUC`, 11 provincias y distritos) y publicación en RustFS
+cargo run --release -p paradixe-ingestor -- sync-all --region PE-HUC --download
+
+# Escalamiento a otros departamentos (`PE-PAS`, `PE-JUN`, `PE-UCA`, `PE-SAM`, `PE-ANC`, `PE-ALL`) o bounding box arbitrario
+cargo run --release -p paradixe-ingestor -- sync-all --region PE-PAS
+cargo run --release -p paradixe-ingestor -- sync-all --region PE-CUSTOM --bbox "-77.2,-10.4,-74.5,-8.2" --region-name "Macro-Región Centro"
+
+# Refresco periódico de lluvia 24h/72h e IVV determinista cada 3 horas
+cargo run --release -p paradixe-ingestor -- weather-sync --region PE-HUC --interval-hours 3
+```
+
 ---
 
 ## Hoja de Ruta de Producción
@@ -188,7 +203,7 @@ cargo test -p paradixe-api --test integration_postgis -- --ignored --test-thread
 - [x] **Etapa 1A — Contrato OpenAPI 3.1 y Motores CLI en Rust:** `openapi-v1.json`, Cargo Workspace con `#![forbid(unsafe_code)]`, precisión `MidpointAwayFromZero` y suite de pruebas unitarias SDD.
 - [x] **Etapa 1B — PWA Offline-First (`apps/web`):** MapLibre GL JS + PMTiles, IndexedDB atómica (`sync_control` + `outbox_queue`), rotación diaria de ID GPS, validación accesible y CI en GitHub Actions.
 - [x] **Etapa 2A — API Core (`paradixe-api`):** Servidor Axum/SQLx con los 22 endpoints `/api/v1`, roles RBAC, rol `paradixe_sim_ro` de solo lectura operativa, `sync_control` transaccional y suite de integración sobre PostgreSQL 16 + PostGIS 3.4 real.
-- [ ] **Etapa 2B — Ingestor Real (`paradixe-ingestor`):** Worker de ingesta OSM Geofabrik + DEM SRTM/ALOS + clima cada 3 h (`OPEN_METEO`/`NASA_GPM`/`SENAMHI`) y generación de `PMTiles` regionales.
+- [x] **Etapa 2B — Ingestor Real Multi-Región (`paradixe-ingestor`):** Worker escalable de ingesta OSM Geofabrik + NASA SRTM 30m + clima `OPEN_METEO` cada 3 h + generación y publicación de archivos `PMTiles v3` regionales sobre RustFS/S3 (en producción inicial sobre todo el departamento de Huánuco `PE-HUC`).
 - [ ] **Etapa 3 — Mensajería Multicanal (`paradixe-messaging`):** Adaptadores de producción para WhatsApp Cloud API y SMS fallback con firmas HMAC.
 - [ ] **Etapa 4 — Piloto Operativo B2B/B2G:** Despliegue controlado en Huánuco–Carpish–Tingo María con operadores logísticos, gremios agrícolas, COER y redes de salud.
 

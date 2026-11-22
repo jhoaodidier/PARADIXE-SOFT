@@ -6,6 +6,11 @@ export default defineConfig({
   build: {
     target: "esnext",
   },
+  server: {
+    proxy: {
+      "/api": "http://127.0.0.1:8080",
+    },
+  },
   plugins: [
     react(),
     VitePWA({

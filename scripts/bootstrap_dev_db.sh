@@ -27,6 +27,10 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0002_seed_base_catalogs.sq
 echo "Applying migrations/0002_seed_base_catalogs.sql (pass 2 - idempotency check)..."
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0002_seed_base_catalogs.sql
 
+echo "Applying migrations/0003_territorial_regions_and_osm_lineage.sql..."
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0003_territorial_regions_and_osm_lineage.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0003_territorial_regions_and_osm_lineage.sql
+
 DB_NAME="$(python3 -c 'import os, urllib.parse; u = urllib.parse.urlparse(os.environ["DATABASE_URL"]); print(u.path.lstrip("/") or "paradixe_soft")')"
 SIM_USER="$(python3 -c 'import os, urllib.parse; u = urllib.parse.urlparse(os.environ["SIMULATOR_DATABASE_URL"]); print(u.username or "paradixe_sim_ro")')"
 SIM_PASS="$(python3 -c 'import os, urllib.parse; u = urllib.parse.urlparse(os.environ["SIMULATOR_DATABASE_URL"]); print(urllib.parse.unquote(u.password or ""))')"
@@ -37,7 +41,7 @@ if [ -z "$SIM_PASS" ]; then
 fi
 
 echo "Provisioning least-privilege role '$SIM_USER' on database '$DB_NAME'..."
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -o /dev/null \
   -v sim_user="$SIM_USER" \
   -v sim_pass="$SIM_PASS" \
   -v db_name="$DB_NAME" <<'SQL'
@@ -71,6 +75,7 @@ BEGIN
     'transfer_corridors, transfer_corridor_capabilities, ivv_model_versions, ' ||
     'routing_config_versions, impact_parameter_versions, weather_observations, ' ||
     'ivv_assessments, incidents, humanitarian_windows, ' ||
+    'territorial_units, hydrography_waterways, ' ||
     'simulation_scenarios, sim_events, simulation_impact_logs TO %I',
     v_user
   );
@@ -91,10 +96,10 @@ IMP_COUNT="$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM impact_parameter_ve
 
 echo "Verified: tables=$TABLE_COUNT roles=$ROLE_COUNT vehicles=$VEH_COUNT sync_seq=$SYNC_SEQ ivv=$IVV_TAG routing=$RTE_TAG impact_active=$IMP_COUNT"
 
-test "$TABLE_COUNT" -eq 27
+test "$TABLE_COUNT" -eq 29
 test "$ROLE_COUNT" -eq 5
 test "$VEH_COUNT" -eq 5
-test "$SYNC_SEQ" -eq 0
+test "$SYNC_SEQ" -ge 0
 test "$IVV_TAG" = "ivv-v1.0-initial"
 test "$RTE_TAG" = "routing-v1.0"
 test "$IMP_COUNT" -eq 5

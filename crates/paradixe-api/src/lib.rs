@@ -151,8 +151,9 @@ pub fn build_router(state: AppState) -> Router {
         // Sync (2)
         .route("/sync/snapshot", get(sync::get_sync_snapshot))
         .route("/sync/batch", post(sync::post_sync_batch))
-        // Corridors & IVV (2)
+        // Corridors, Regions & IVV
         .route("/corridors/map", get(corridors::get_corridors_map))
+        .route("/regions", get(corridors::get_regions))
         .route("/ivv/recalculate", post(corridors::recalculate_ivv))
         // Telemetry, Field Reports, Webhooks & Incidents (4)
         .route("/telemetry/pings", post(incidents::ingest_telemetry_pings))

@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::{
     auth::{AuthUser, RoleCode},
-    error::{ApiError, ValidatedJson},
+    error::{ApiError, ValidatedJson, ValidatedQuery},
     sync::append_sync_change,
     AppState,
 };
@@ -112,10 +112,133 @@ pub async fn load_active_ivv_model(
     Ok((model_version_id, params))
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CorridorsMapQuery {
+    pub region: Option<String>,
+    pub bbox: Option<String>,
+    pub limit: Option<i64>,
+}
+
+fn parse_bbox_filter(raw: &str) -> Result<(f64, f64, f64, f64), ApiError> {
+    let parts: Vec<&str> = raw.split(',').map(str::trim).collect();
+    if parts.len() != 4 {
+        return Err(ApiError::validation(
+            "bbox must have format min_lon,min_lat,max_lon,max_lat",
+        ));
+    }
+    let min_lon: f64 = parts[0]
+        .parse()
+        .map_err(|_| ApiError::validation("Invalid bbox min_lon"))?;
+    let min_lat: f64 = parts[1]
+        .parse()
+        .map_err(|_| ApiError::validation("Invalid bbox min_lat"))?;
+    let max_lon: f64 = parts[2]
+        .parse()
+        .map_err(|_| ApiError::validation("Invalid bbox max_lon"))?;
+    let max_lat: f64 = parts[3]
+        .parse()
+        .map_err(|_| ApiError::validation("Invalid bbox max_lat"))?;
+    if !(-180.0..=180.0).contains(&min_lon)
+        || !(-180.0..=180.0).contains(&max_lon)
+        || !(-90.0..=90.0).contains(&min_lat)
+        || !(-90.0..=90.0).contains(&max_lat)
+        || min_lon >= max_lon
+        || min_lat >= max_lat
+    {
+        return Err(ApiError::validation("Invalid bbox bounds"));
+    }
+    Ok((min_lon, min_lat, max_lon, max_lat))
+}
+
+#[derive(Debug, Serialize)]
+pub struct TerritorialUnitDto {
+    pub unit_id: Uuid,
+    pub ubigeo_code: String,
+    pub iso_code: Option<String>,
+    pub parent_unit_id: Option<Uuid>,
+    pub name: String,
+    pub admin_level: i16,
+    pub center_lon: f64,
+    pub center_lat: f64,
+    pub pmtiles_uri: Option<String>,
+    pub segment_count: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RegionsListResponse {
+    pub regions: Vec<TerritorialUnitDto>,
+}
+
+pub async fn get_regions(
+    State(state): State<AppState>,
+) -> Result<Json<RegionsListResponse>, ApiError> {
+    let rows = sqlx::query(
+        "SELECT
+            tu.unit_id,
+            tu.ubigeo_code,
+            tu.iso_code,
+            tu.parent_unit_id,
+            tu.name,
+            tu.admin_level,
+            ST_X(tu.centroid_geom) AS center_lon,
+            ST_Y(tu.centroid_geom) AS center_lat,
+            tu.pmtiles_uri,
+            (
+                SELECT count(*)
+                FROM road_segments rs
+                WHERE rs.is_topology_verified = TRUE
+                  AND (
+                      rs.territorial_unit_id = tu.unit_id
+                      OR ST_Intersects(rs.geom, tu.bbox_geom)
+                  )
+            ) AS segment_count
+         FROM territorial_units tu
+         WHERE tu.is_enabled = TRUE
+         ORDER BY tu.admin_level ASC, tu.ubigeo_code ASC, tu.name ASC",
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(ApiError::from_db)?;
+
+    let mut regions = Vec::with_capacity(rows.len());
+    for row in rows {
+        regions.push(TerritorialUnitDto {
+            unit_id: row.try_get("unit_id").map_err(ApiError::from_db)?,
+            ubigeo_code: row.try_get("ubigeo_code").map_err(ApiError::from_db)?,
+            iso_code: row.try_get("iso_code").map_err(ApiError::from_db)?,
+            parent_unit_id: row.try_get("parent_unit_id").map_err(ApiError::from_db)?,
+            name: row.try_get("name").map_err(ApiError::from_db)?,
+            admin_level: row.try_get("admin_level").map_err(ApiError::from_db)?,
+            center_lon: row.try_get("center_lon").map_err(ApiError::from_db)?,
+            center_lat: row.try_get("center_lat").map_err(ApiError::from_db)?,
+            pmtiles_uri: row.try_get("pmtiles_uri").map_err(ApiError::from_db)?,
+            segment_count: row.try_get("segment_count").map_err(ApiError::from_db)?,
+        });
+    }
+
+    Ok(Json(RegionsListResponse { regions }))
+}
+
 pub async fn get_corridors_map(
     State(state): State<AppState>,
+    ValidatedQuery(query): ValidatedQuery<CorridorsMapQuery>,
 ) -> Result<Json<CorridorMapFeatureCollectionDto>, ApiError> {
     let now = Utc::now();
+    let limit = query.limit.unwrap_or(2000).clamp(1, 10_000);
+    let bbox = query.bbox.as_deref().map(parse_bbox_filter).transpose()?;
+    let region_code = query
+        .region
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
+    let (min_lon, min_lat, max_lon, max_lat, has_bbox) = match bbox {
+        Some((x0, y0, x1, y1)) => (x0, y0, x1, y1, true),
+        None => (0.0, 0.0, 0.0, 0.0, false),
+    };
+
     let rows = sqlx::query(
         "SELECT
             rs.segment_id,
@@ -166,8 +289,28 @@ pub async fn get_corridors_map(
             LIMIT 1
          ) latest_ivv ON TRUE
          WHERE rs.is_topology_verified = TRUE
-         ORDER BY rs.corridor_name ASC, rs.segment_id ASC",
+           AND (
+               NOT $1
+               OR rs.geom && ST_MakeEnvelope($2, $3, $4, $5, 4326)
+           )
+           AND (
+               $6::text IS NULL
+               OR EXISTS (
+                   SELECT 1 FROM territorial_units tu
+                   WHERE (UPPER(tu.iso_code) = UPPER($6) OR UPPER(tu.ubigeo_code) = UPPER($6))
+                     AND ST_Intersects(rs.geom, tu.bbox_geom)
+               )
+           )
+         ORDER BY rs.corridor_name ASC, rs.segment_id ASC
+         LIMIT $7",
     )
+    .bind(has_bbox)
+    .bind(min_lon)
+    .bind(min_lat)
+    .bind(max_lon)
+    .bind(max_lat)
+    .bind(region_code)
+    .bind(limit)
     .fetch_all(&state.pool)
     .await
     .map_err(ApiError::from_db)?;
