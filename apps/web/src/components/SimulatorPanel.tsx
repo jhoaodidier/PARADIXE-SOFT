@@ -257,6 +257,7 @@ export function SimulatorPanel({
                   <label htmlFor="sim-segment">Tramo del fixture Carpish</label>
                   <select
                     id="sim-segment"
+                    className="brand-select"
                     value={targetSegId}
                     onChange={(e) => setTargetSegId(e.target.value)}
                   >
@@ -270,6 +271,7 @@ export function SimulatorPanel({
                   <label htmlFor="sim-event-mode">Tipo de evento</label>
                   <select
                     id="sim-event-mode"
+                    className="brand-select"
                     value={eventMode}
                     onChange={(e) =>
                       setEventMode(e.target.value as "WEATHER" | "BLOCKED" | "PARTIAL")
@@ -338,6 +340,7 @@ export function SimulatorPanel({
                   <label htmlFor="sim-vehicle">Vehículo evaluado</label>
                   <select
                     id="sim-vehicle"
+                    className="brand-select"
                     value={vehicleCode}
                     onChange={(e) => setVehicleCode(e.target.value as VehicleCategoryCode)}
                   >
@@ -353,6 +356,7 @@ export function SimulatorPanel({
                   <label htmlFor="sim-cargo">Carga</label>
                   <select
                     id="sim-cargo"
+                    className="brand-select"
                     value={cargoType}
                     onChange={(e) => setCargoType(e.target.value as CargoType)}
                   >

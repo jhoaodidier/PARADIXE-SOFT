@@ -271,6 +271,7 @@ export function BridgesPanel({
             <label htmlFor="bridge-incident">Incidente asociado</label>
             <select
               id="bridge-incident"
+              className="brand-select"
               value={effIncident}
               onChange={(e) => setIncidentId(e.target.value)}
             >
@@ -285,6 +286,7 @@ export function BridgesPanel({
             <label htmlFor="bridge-corridor">Corredor de transbordo</label>
             <select
               id="bridge-corridor"
+              className="brand-select"
               value={effCorridor}
               onChange={(e) => setCorridorId(e.target.value)}
             >
@@ -299,6 +301,7 @@ export function BridgesPanel({
             <label htmlFor="bridge-cargo">Tipo de carga</label>
             <select
               id="bridge-cargo"
+              className="brand-select"
               value={cargoType}
               onChange={(e) => setCargoType(e.target.value as CargoType)}
             >
@@ -348,6 +351,7 @@ export function BridgesPanel({
               <label htmlFor="win-incident">Incidente confirmado (1 carril)</label>
               <select
                 id="win-incident"
+                className="brand-select"
                 value={effWinIncident}
                 onChange={(e) => setWinIncidentId(e.target.value)}
               >
@@ -362,6 +366,7 @@ export function BridgesPanel({
               <label htmlFor="win-vehicle">Categoría vehicular autorizada</label>
               <select
                 id="win-vehicle"
+                className="brand-select"
                 value={effVehicleCat}
                 onChange={(e) => setVehicleCategoryId(e.target.value)}
               >
@@ -376,6 +381,7 @@ export function BridgesPanel({
               <label htmlFor="win-dir">Sentido habilitado</label>
               <select
                 id="win-dir"
+                className="brand-select"
                 value={direction}
                 onChange={(e) =>
                   setDirection(e.target.value as "ORIGIN_TO_DEST" | "DEST_TO_ORIGIN")

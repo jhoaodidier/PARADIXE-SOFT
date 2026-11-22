@@ -124,6 +124,7 @@ export function IncidentsPanel({
         <label htmlFor={filterId}>Filtrar estado</label>
         <select
           id={filterId}
+          className="brand-select"
           value={stateFilter}
           onChange={(e) => setStateFilter(e.target.value)}
         >
@@ -173,6 +174,7 @@ export function IncidentsPanel({
                   <div className="ops-actions-row">
                     <button
                       type="button"
+                      className="btn btn--sm"
                       disabled={!isOnline || busyId === inc.incident_id}
                       onClick={() => void handleVerify(inc.incident_id, "CONFIRMED", "BLOCKED")}
                     >
@@ -180,6 +182,7 @@ export function IncidentsPanel({
                     </button>
                     <button
                       type="button"
+                      className="btn btn--sm"
                       disabled={!isOnline || busyId === inc.incident_id}
                       onClick={() =>
                         void handleVerify(inc.incident_id, "CONFIRMED", "PARTIAL_ONE_LANE")
@@ -189,6 +192,7 @@ export function IncidentsPanel({
                     </button>
                     <button
                       type="button"
+                      className="btn btn--sm"
                       disabled={!isOnline || busyId === inc.incident_id}
                       onClick={() =>
                         void handleVerify(inc.incident_id, "RESOLVED", inc.impact_passability)
@@ -198,6 +202,7 @@ export function IncidentsPanel({
                     </button>
                     <button
                       type="button"
+                      className="btn btn--sm"
                       disabled={!isOnline || busyId === inc.incident_id}
                       onClick={() =>
                         void handleVerify(inc.incident_id, "DISMISSED", inc.impact_passability)

@@ -168,7 +168,7 @@ export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProp
       </p>
 
       {!isOnline && (
-        <div className="banner banner--warning" role="status">
+        <div className="banner banner--warning" role="status" style={{ marginBlockEnd: "0.75rem" }}>
           <span>
             Modo sin conexión: cálculo de nueva ruta deshabilitado. Consulte solo tramos en caché.
           </span>
@@ -198,6 +198,7 @@ export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProp
           <select
             id="route-origin"
             name="origin_node_id"
+            className="brand-select"
             required
             value={effectiveOrigin}
             onChange={(e) => setOriginNodeId(e.target.value)}
@@ -226,6 +227,7 @@ export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProp
           <select
             id="route-dest"
             name="destination_node_id"
+            className="brand-select"
             required
             value={effectiveDest}
             onChange={(e) => setDestinationNodeId(e.target.value)}
@@ -251,9 +253,9 @@ export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProp
 
         <fieldset>
           <legend>Categoría vehicular</legend>
-          <div className="radio-group">
+          <div className="choice-grid">
             {VEHICLE_OPTIONS.map((opt) => (
-              <label key={opt.code} className="radio-option">
+              <label key={opt.code} className="choice-card">
                 <input
                   type="radio"
                   name="vehicle_category_code"
@@ -269,9 +271,9 @@ export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProp
 
         <fieldset>
           <legend>Tipo de carga o traslado</legend>
-          <div className="radio-group">
+          <div className="choice-grid">
             {CARGO_OPTIONS.map((opt) => (
-              <label key={opt.code} className="radio-option">
+              <label key={opt.code} className="choice-card">
                 <input
                   type="radio"
                   name="cargo_type"
@@ -314,7 +316,7 @@ export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProp
 
         <button
           type="submit"
-          className="btn btn--primary"
+          className="btn btn--primary icon-start ico-route"
           disabled={submitting || !isOnline || allNodeOptions.length === 0}
         >
           {submitting ? "Evaluando ruta segura..." : "Calcular ruta verificable"}

@@ -207,6 +207,10 @@ describe("UI Fail-Safe, Accesibilidad y Consola Operativa PARADIXE SOFT", () => 
 
     const originSelect = screen.getByLabelText("Nodo origen");
     expect(originSelect).toHaveAttribute("aria-invalid", "false");
+
+    const ivvMeter = screen.getByRole("progressbar", { name: "Índice de Vulnerabilidad Vial" });
+    expect(ivvMeter).toHaveAttribute("max", "100");
+    expect(screen.getByLabelText("Camioneta 4x4").closest("label")).toHaveClass("choice-card");
   });
 
   it("renderiza NO_SAFE_ROUTE con reason_code unico sin inventar ruta", async () => {

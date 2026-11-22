@@ -420,11 +420,13 @@ export function App({ initialFeatures }: AppProps) {
     {
       id: "routing",
       label: "Enrutamiento",
+      iconClass: "ico-route",
       content: <RoutingPanel features={features} isOnline={isOnline} authToken={authToken} />,
     },
     {
       id: "incidents",
       label: "Incidentes",
+      iconClass: "ico-shield",
       badge: incidents.filter(
         (i) => i.verification_state === "SUSPECTED" || i.verification_state === "CONFIRMED"
       ).length,
@@ -444,6 +446,7 @@ export function App({ initialFeatures }: AppProps) {
     {
       id: "bridges",
       label: "Puentes y Ventanas",
+      iconClass: "ico-bridge",
       badge: bridgesOperations?.bridges.length ?? 0,
       content: (
         <BridgesPanel
@@ -461,6 +464,7 @@ export function App({ initialFeatures }: AppProps) {
     {
       id: "simulator",
       label: "Simulador",
+      iconClass: "ico-flask",
       content: (
         <SimulatorPanel
           isOnline={isOnline}
@@ -473,6 +477,17 @@ export function App({ initialFeatures }: AppProps) {
     },
   ];
 
+  const selectedEffectiveRisk =
+    selectedFeature?.properties.is_stale || !selectedFeature
+      ? "UNKNOWN"
+      : selectedFeature.properties.risk_level;
+  const selectedIvvValue =
+    !selectedFeature ||
+    selectedFeature.properties.is_stale ||
+    selectedFeature.properties.ivv_score === null
+      ? 0
+      : Math.min(100, Math.max(0, selectedFeature.properties.ivv_score));
+
   return (
     <div className="app-shell">
       <a href="#main-content" className="skip-link visually-hidden">
@@ -480,22 +495,37 @@ export function App({ initialFeatures }: AppProps) {
       </a>
 
       <header className="app-header">
-        <div className="brand-group">
-          <h1 className="brand-title">PARADIXE SOFT</h1>
-          <p className="brand-subtitle">
-            Red Territorial de Resiliencia Vial y Logística Crítica — TakumiSoft
-          </p>
+        <div className="brand-lockup">
+          <img src="/icon.svg" alt="" width={36} height={36} className="brand-logo" />
+          <div className="brand-group">
+            <div className="brand-title-row">
+              <h1 className="brand-title">PARADIXE SOFT</h1>
+              <span
+                className={`conn-pill ${isOnline ? "conn-pill--online" : "conn-pill--offline"}`}
+              >
+                {isOnline ? "En línea" : "Offline"}
+              </span>
+            </div>
+            <p className="brand-subtitle">
+              Red Territorial de Resiliencia Vial y Logística Crítica — TakumiSoft
+            </p>
+          </div>
         </div>
 
         <nav className="primary-nav" aria-label="Acciones operativas principales">
           <button
             type="button"
-            className="btn btn--primary"
+            className="btn btn--primary icon-start ico-alert"
             onClick={() => setReportModalOpen(true)}
           >
             Reportar vía
           </button>
-          <button type="button" onClick={() => void syncWithServer()} disabled={!isOnline}>
+          <button
+            type="button"
+            className="icon-start ico-sync"
+            onClick={() => void syncWithServer()}
+            disabled={!isOnline}
+          >
             Sincronizar ({syncMeta.last_seq})
           </button>
           {currentUser ? (
@@ -503,16 +533,38 @@ export function App({ initialFeatures }: AppProps) {
               <span>
                 {currentUser.full_name} · <strong>{currentUser.role_code}</strong>
               </span>
-              <button type="button" onClick={() => void handleLogout()}>
+              <button
+                type="button"
+                className="btn--sm icon-start ico-logout"
+                onClick={() => void handleLogout()}
+              >
                 Salir
               </button>
             </div>
           ) : (
-            <button type="button" onClick={() => setAuthModalOpen(true)}>
+            <button
+              type="button"
+              className="icon-start ico-user"
+              onClick={() => setAuthModalOpen(true)}
+            >
               Iniciar sesión
             </button>
           )}
-          <button type="button" onClick={() => setSettingsModalOpen(true)}>
+          <button
+            type="button"
+            className={`icon-start ${resolvedScheme === "dark" ? "ico-sun" : "ico-moon"}`}
+            aria-label={
+              resolvedScheme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"
+            }
+            onClick={() => handleThemeChange(resolvedScheme === "dark" ? "light" : "dark")}
+          >
+            {resolvedScheme === "dark" ? "Claro" : "Oscuro"}
+          </button>
+          <button
+            type="button"
+            className="icon-start ico-settings"
+            onClick={() => setSettingsModalOpen(true)}
+          >
             Configuración
           </button>
         </nav>
@@ -579,17 +631,55 @@ export function App({ initialFeatures }: AppProps) {
 
         <aside className="side-panel" aria-label="Panel operativo de tramo y enrutamiento">
           {selectedFeature && (
-            <section className="card" aria-labelledby="selected-segment-title">
-              <h2 id="selected-segment-title">Detalle del Tramo Seleccionado</h2>
-              <p>
-                <strong>{selectedFeature.properties.corridor_name}</strong>
-              </p>
-              <RiskBadge
-                riskLevel={selectedFeature.properties.risk_level}
-                ivvScore={selectedFeature.properties.ivv_score}
-                isStale={selectedFeature.properties.is_stale}
-              />
-              <div className="metrics-grid" style={{ marginBlockStart: "0.75rem" }}>
+            <article className="card" aria-labelledby="selected-segment-title">
+              <div className="segment-inspector-header">
+                <div>
+                  <h2 id="selected-segment-title" style={{ marginBlockEnd: "0.25rem" }}>
+                    Detalle del Tramo Seleccionado
+                  </h2>
+                  <p style={{ marginBlock: 0 }}>
+                    <strong>{selectedFeature.properties.corridor_name}</strong>
+                  </p>
+                </div>
+                <RiskBadge
+                  riskLevel={selectedFeature.properties.risk_level}
+                  ivvScore={selectedFeature.properties.ivv_score}
+                  isStale={selectedFeature.properties.is_stale}
+                />
+              </div>
+
+              <div className="segment-meter-box">
+                <div className="segment-meter-label">
+                  <span>Índice de Vulnerabilidad Vial (IVV)</span>
+                  <strong className="ivv-score-readout">
+                    {selectedFeature.properties.ivv_score !== null &&
+                    !selectedFeature.properties.is_stale
+                      ? `${selectedFeature.properties.ivv_score.toFixed(2)} / 100`
+                      : "Vencido / Sin dato"}
+                  </strong>
+                </div>
+                <progress
+                  className={`ivv-meter ivv-meter--${selectedEffectiveRisk}`}
+                  max={100}
+                  value={selectedIvvValue}
+                  aria-label="Índice de Vulnerabilidad Vial"
+                />
+              </div>
+
+              <div className="metrics-grid">
+                <div className="metric-box">
+                  <span className="metric-label">Longitud y superficie</span>
+                  <span className="metric-value">
+                    {selectedFeature.properties.length_km.toFixed(1)} km ·{" "}
+                    {selectedFeature.properties.surface_type}
+                  </span>
+                </div>
+                <div className="metric-box">
+                  <span className="metric-label">Transitabilidad</span>
+                  <span className="metric-value">
+                    {selectedFeature.properties.passability_state}
+                  </span>
+                </div>
                 <div className="metric-box">
                   <span className="metric-label">Observación climática</span>
                   <span className="metric-value">
@@ -605,12 +695,12 @@ export function App({ initialFeatures }: AppProps) {
                   </span>
                 </div>
               </div>
-              <p className="hint" style={{ marginBlockStart: "0.75rem" }}>
+              <p className="hint" style={{ marginBlockStart: "0.75rem", marginBlockEnd: 0 }}>
                 {selectedFeature.properties.is_attributes_verified
                   ? "Atributos físicos validados en campo."
                   : "Atributos físicos no verificados en campo (no autorizan despacho)."}
               </p>
-            </section>
+            </article>
           )}
 
           <OperationalTabs tabs={operationalTabs} defaultTabId="routing" />

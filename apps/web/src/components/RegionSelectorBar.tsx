@@ -46,7 +46,10 @@ export function RegionSelectorBar({
       return u.parent_unit_id === selectedProvinceUnitId;
     }
     if (activeRegion) {
-      return u.parent_unit_id === activeRegion.unit_id || (u.parent_unit_id ? provinceIds.has(u.parent_unit_id) : false);
+      return (
+        u.parent_unit_id === activeRegion.unit_id ||
+        (u.parent_unit_id ? provinceIds.has(u.parent_unit_id) : false)
+      );
     }
     return true;
   });
@@ -71,7 +74,7 @@ export function RegionSelectorBar({
     <section className="card region-toolbar-wrap" aria-labelledby={headingId}>
       <div className="region-toolbar-header">
         <div>
-          <h2 id={headingId} style={{ marginBlockEnd: "0.25rem" }}>
+          <h2 id={headingId} className="icon-start ico-layers" style={{ marginBlockEnd: "0.2rem" }}>
             Selector Territorial y Cobertura PMTiles
           </h2>
           <p className="hint" style={{ marginBlockEnd: 0 }}>
@@ -93,6 +96,7 @@ export function RegionSelectorBar({
           <label htmlFor={regionSelectId}>Departamento / Región</label>
           <select
             id={regionSelectId}
+            className="brand-select"
             value={selectedRegionCode}
             onChange={(e) => onSelectRegion(e.target.value)}
           >
@@ -115,6 +119,7 @@ export function RegionSelectorBar({
           <label htmlFor={provinceSelectId}>Provincia ({provinces.length})</label>
           <select
             id={provinceSelectId}
+            className="brand-select"
             value={selectedProvinceUnitId}
             onChange={(e) => onSelectProvince(e.target.value)}
             disabled={provinces.length === 0}
@@ -132,6 +137,7 @@ export function RegionSelectorBar({
           <label htmlFor={districtSelectId}>Distrito / Centro ({districts.length})</label>
           <select
             id={districtSelectId}
+            className="brand-select"
             value={selectedDistrictUnitId}
             onChange={(e) => onSelectDistrict(e.target.value)}
             disabled={districts.length === 0}
@@ -153,7 +159,9 @@ export function RegionSelectorBar({
         <span className="risk-badge risk-badge--GREEN">VERDE: {greenCount}</span>
         <span className="risk-badge risk-badge--AMBER">ÁMBAR: {amberCount}</span>
         <span className="risk-badge risk-badge--RED">ROJO: {redCount}</span>
-        <span className="risk-badge risk-badge--UNKNOWN">DESCONOCIDO / VENCIDO: {unknownCount}</span>
+        <span className="risk-badge risk-badge--UNKNOWN">
+          DESCONOCIDO / VENCIDO: {unknownCount}
+        </span>
       </div>
     </section>
   );

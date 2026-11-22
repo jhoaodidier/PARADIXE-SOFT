@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode 
 export interface TabDefinition {
   id: string;
   label: string;
+  iconClass?: string;
   badge?: string | number;
   content: ReactNode;
 }
@@ -141,7 +142,7 @@ export function OperationalTabs({ tabs, defaultTabId }: OperationalTabsProps) {
               type="button"
               role="tab"
               id={tabDomId}
-              className="ops-tab"
+              className={`ops-tab${tab.iconClass ? ` icon-start ${tab.iconClass}` : ""}`}
               aria-selected={selected}
               tabIndex={selected ? 0 : -1}
               onClick={() => selectTab(tab.id, false, index)}

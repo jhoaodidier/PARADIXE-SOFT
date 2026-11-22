@@ -158,6 +158,7 @@ export function FieldReportModal({
             <select
               id="report-segment"
               name="segment_id"
+              className="brand-select"
               required
               autoFocus
               value={effectiveSegmentId}
@@ -184,8 +185,8 @@ export function FieldReportModal({
 
           <fieldset>
             <legend>Transitabilidad observada</legend>
-            <div className="radio-group">
-              <label className="radio-option">
+            <div className="choice-grid">
+              <label className="choice-card">
                 <input
                   type="radio"
                   name="proposed_passability"
@@ -195,7 +196,7 @@ export function FieldReportModal({
                 />
                 <span>Vía bloqueada (derrumbe / huaico)</span>
               </label>
-              <label className="radio-option">
+              <label className="choice-card">
                 <input
                   type="radio"
                   name="proposed_passability"
@@ -205,7 +206,7 @@ export function FieldReportModal({
                 />
                 <span>Paso restringido a un carril</span>
               </label>
-              <label className="radio-option">
+              <label className="choice-card">
                 <input
                   type="radio"
                   name="proposed_passability"
