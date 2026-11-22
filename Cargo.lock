@@ -1437,6 +1437,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "paradixe-messaging"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "chrono",
+ "clap",
+ "dotenvy",
+ "hex",
+ "hmac",
+ "http",
+ "paradixe-domain",
+ "reqwest",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sha2",
+ "subtle",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "paradixe-routing"
 version = "0.1.0"
 dependencies = [

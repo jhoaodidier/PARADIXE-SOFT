@@ -8,6 +8,7 @@ members = [
   "crates/paradixe-impact",
   "crates/paradixe-api",
   "crates/paradixe-ingestor",
+  "crates/paradixe-messaging",
 ]
 
 [workspace.package]

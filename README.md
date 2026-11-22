@@ -85,8 +85,9 @@ Siguiendo los **Artículos I y II SDD (*Library-First & CLI*)**, cada motor del 
 | [`paradixe-consensus`](./crates/paradixe-consensus) | Hash seudónimo HMAC diario, clúster GPS (`SUSPECTED` únicamente) y consenso comunitario (`CON-01`). | Deduplicación `30 min`, apoyo $S \ge 1.00$, margen $\ge 0.50$ |
 | [`paradixe-routing`](./crates/paradixe-routing) | Enrutador bidireccional Dijkstra, ventanas humanitarias y Puente Logístico (`RTE-01..04`, `BRG-01..03`). | Poda vehicular, ventanas `[entry, exit]`, precedencia diagnóstica |
 | [`paradixe-impact`](./crates/paradixe-impact) | Evaluador reproducible de tiempo, $\text{CO}_2$ y merma agrícola (`SIM-01`, `SIM-02`, `IMP-01`). | `null` en `NO_SAFE_ROUTE`, deltas negativos preservados |
-| [`paradixe-api`](./crates/paradixe-api) | API Core Axum + SQLx (22 endpoints `/api/v1`, JWT/Argon2id/OTP, `sync_control`, módulo de simulacros RO). | `SEC-01..07`, `GEO-01..03`, `SYN-01..04`, `E2E-01` sobre PostGIS |
-| [`paradixe-ingestor`](./crates/paradixe-ingestor) | Ingestor multi-región (`#![forbid(unsafe_code)]`): OSM PBF Geofabrik, NASA SRTM 30m, Open-Meteo IVV cada 3 h y `PMTiles v3` en RustFS/S3. | `PE-HUC` (11 provincias y distritos), `PE-PAS`, `PE-JUN`, `PE-UCA`, `PE-SAM`, `PE-ANC`, `PE-ALL`, `--bbox` |
+| [`paradixe-api`](./crates/paradixe-api) | API Core Axum + SQLx (endpoints `/api/v1`, JWT/Argon2id/OTP, `sync_control`, certificación auditada, simulacros RO). | `SEC-01..07`, `GEO-01..03`, `SYN-01..04`, `E2E-01` sobre PostGIS |
+| [`paradixe-ingestor`](./crates/paradixe-ingestor) | Ingestor multi-región (`#![forbid(unsafe_code)]`): OSM PBF Geofabrik, NASA SRTM 30m, Open-Meteo IVV cada 2 h y `PMTiles v3` en RustFS/S3. | `PE-HUC` (11 provincias y distritos), `PE-PAS`, `PE-JUN`, `PE-UCA`, `PE-SAM`, `PE-ANC`, `PE-ALL`, `--bbox` |
+| [`paradixe-messaging`](./crates/paradixe-messaging) | Pasarela multicanal Etapa 3 (`#![forbid(unsafe_code)]`): WhatsApp Cloud API + fallback SMS + parser ciudadano + puente HMAC hacia `paradixe-api`. | Webhooks `GET/POST /webhooks/whatsapp`, `POST /webhooks/sms`, parser ES-PE |
 
 ### Ejemplo Ejecutable (`paradixe-ivv` CLI)
 
@@ -191,11 +192,11 @@ cargo run --release -p paradixe-ingestor -- sync-all --region PE-HUC --download
 cargo run --release -p paradixe-ingestor -- sync-all --region PE-PAS
 cargo run --release -p paradixe-ingestor -- sync-all --region PE-CUSTOM --bbox "-77.2,-10.4,-74.5,-8.2" --region-name "Macro-Región Centro"
 
-# Refresco periódico de lluvia 24h/72h e IVV determinista cada 3 horas
-cargo run --release -p paradixe-ingestor -- weather-sync --region PE-HUC --interval-hours 3
+# Refresco periódico de lluvia 24h/72h e IVV determinista cada 2 horas
+./scripts/run_weather_daemon.sh PE-HUC 2
 ```
 
-### 6. Consola Web en Vivo (API + RustFS PMTiles + PWA)
+### 6. Consola Web en Vivo y Pasarela WhatsApp/SMS (API + RustFS PMTiles + PWA)
 ```bash
 # 1. Crear usuarios operadores locales (COER_ADMIN, CIVIL_DEFENSE, HEALTH_OPERATOR)
 cargo run -p paradixe-api --bin seed_dev_users
@@ -203,7 +204,10 @@ cargo run -p paradixe-api --bin seed_dev_users
 # 2. Levantar API Core en http://127.0.0.1:8080
 cargo run -p paradixe-api --bin paradixe-api
 
-# 3. Levantar PWA con proxy hacia /api y /tiles (http://localhost:5173)
+# 3. Levantar pasarela WhatsApp Cloud API + SMS en http://127.0.0.1:8090
+cargo run -p paradixe-messaging -- serve
+
+# 4. Levantar PWA con proxy hacia /api y /tiles (http://localhost:5173)
 cd apps/web && npm install && npm run dev
 ```
 
@@ -214,9 +218,9 @@ cd apps/web && npm install && npm run dev
 - [x] **Etapa 0 — Arquitectura SDD y Base de Datos:** Especificación `2.0.0-prod-sdd-rust`, esquema PostgreSQL 16 + PostGIS 3.4 (27 tablas 3NF), semillas base e infraestructura Docker (PostGIS + RustFS).
 - [x] **Etapa 1A — Contrato OpenAPI 3.1 y Motores CLI en Rust:** `openapi-v1.json`, Cargo Workspace con `#![forbid(unsafe_code)]`, precisión `MidpointAwayFromZero` y suite de pruebas unitarias SDD.
 - [x] **Etapa 1B — PWA Offline-First (`apps/web`):** MapLibre GL JS + PMTiles, IndexedDB atómica (`sync_control` + `outbox_queue`), rotación diaria de ID GPS, validación accesible y CI en GitHub Actions.
-- [x] **Etapa 2A — API Core (`paradixe-api`):** Servidor Axum/SQLx con los 22 endpoints `/api/v1`, roles RBAC, rol `paradixe_sim_ro` de solo lectura operativa, `sync_control` transaccional y suite de integración sobre PostgreSQL 16 + PostGIS 3.4 real.
-- [x] **Etapa 2B — Ingestor Real Multi-Región (`paradixe-ingestor`):** Worker escalable de ingesta OSM Geofabrik + NASA SRTM 30m + clima `OPEN_METEO` cada 3 h + generación y publicación de archivos `PMTiles v3` regionales sobre RustFS/S3 (en producción inicial sobre todo el departamento de Huánuco `PE-HUC`).
-- [ ] **Etapa 3 — Mensajería Multicanal (`paradixe-messaging`):** Adaptadores de producción para WhatsApp Cloud API y SMS fallback con firmas HMAC.
+- [x] **Etapa 2A — API Core (`paradixe-api`):** Servidor Axum/SQLx (`/api/v1`), roles RBAC, certificación física auditada, rol `paradixe_sim_ro` de solo lectura operativa, `sync_control` transaccional y suite de integración sobre PostgreSQL 16 + PostGIS 3.4 real.
+- [x] **Etapa 2B — Ingestor Real Multi-Región (`paradixe-ingestor`):** Worker escalable de ingesta OSM Geofabrik + NASA SRTM 30m + clima `OPEN_METEO` + generación y publicación de archivos `PMTiles v3` regionales sobre RustFS/S3 (activo sobre todo Huánuco `PE-HUC`).
+- [x] **Etapa 3 — Mensajería Multicanal (`paradixe-messaging`):** Adaptadores de producción para WhatsApp Cloud API y fallback SMS con parser ciudadano en español y firmas HMAC constantes.
 - [ ] **Etapa 4 — Piloto Operativo B2B/B2G:** Despliegue controlado en Huánuco–Carpish–Tingo María con operadores logísticos, gremios agrícolas, COER y redes de salud.
 
 ---
