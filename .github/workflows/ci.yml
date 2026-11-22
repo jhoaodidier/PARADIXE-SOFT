@@ -1,0 +1,93 @@
+name: CI
+
+    on:
+      push:
+        branches: [main]
+      pull_request:
+        branches: [main]
+
+    env:
+      CARGO_TERM_COLOR: always
+
+    jobs:
+      rust-core:
+        name: Rust Core & CLI Engines
+        runs-on: ubuntu-latest
+        steps:
+          - uses: actions/checkout@v4
+          - uses: dtolnay/rust-toolchain@stable
+            with:
+              components: rustfmt, clippy
+          - uses: Swatinem/rust-cache@v2
+          - name: Check formatting
+            run: cargo fmt --all -- --check
+          - name: Run clippy
+            run: cargo clippy --workspace --all-targets -- -D warnings
+          - name: Run workspace unit tests
+            run: cargo test --workspace
+
+      web-pwa:
+        name: Offline-First PWA & OpenAPI Contract
+        runs-on: ubuntu-latest
+        defaults:
+          run:
+            working-directory: apps/web
+        steps:
+          - uses: actions/checkout@v4
+          - uses: actions/setup-node@v4
+            with:
+              node-version: "22"
+              cache: npm
+              cache-dependency-path: apps/web/package-lock.json
+          - name: Install dependencies
+            run: npm ci
+          - name: Verify OpenAPI TypeScript schema sync
+            run: npm run gen:api
+          - name: Typecheck
+            run: npm run typecheck
+          - name: Run Vitest suite
+            run: npm test
+          - name: Build production PWA
+            run: npm run build
+
+      postgis-migrations:
+        name: PostgreSQL 16 + PostGIS 3.4 Migrations
+        runs-on: ubuntu-latest
+        services:
+          postgres:
+            image: postgis/postgis:16-3.4
+            env:
+              POSTGRES_DB: paradixe_soft
+              POSTGRES_USER: paradixe_app
+              POSTGRES_PASSWORD: ci_password
+            ports:
+              - 5432:5432
+            options: >-
+              --health-cmd "pg_isready -U paradixe_app -d paradixe_soft"
+              --health-interval 5s
+              --health-timeout 5s
+              --health-retries 10
+        steps:
+          - uses: actions/checkout@v4
+          - name: Ensure PostgreSQL client
+            run: |
+              command -v psql >/dev/null 2>&1 || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+          - name: Apply migrations and verify idempotency
+            env:
+              PGPASSWORD: ci_password
+            run: |
+              psql -h 127.0.0.1 -U paradixe_app -d paradixe_soft -v ON_ERROR_STOP=1 -f migrations/0001_initial_schema.sql
+              psql -h 127.0.0.1 -U paradixe_app -d paradixe_soft -v ON_ERROR_STOP=1 -f migrations/0002_seed_base_catalogs.sql
+              psql -h 127.0.0.1 -U paradixe_app -d paradixe_soft -v ON_ERROR_STOP=1 -f migrations/0002_seed_base_catalogs.sql
+          - name: Verify schema table count and base catalogs
+            env:
+              PGPASSWORD: ci_password
+            run: |
+              TABLE_COUNT=$(psql -h 127.0.0.1 -U paradixe_app -d paradixe_soft -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE
+              TABLE' AND table_name <> 'spatial_ref_sys';")
+              ROLE_COUNT=$(psql -h 127.0.0.1 -U paradixe_app -d paradixe_soft -tAc "SELECT count(*) FROM roles;")
+              VEH_COUNT=$(psql -h 127.0.0.1 -U paradixe_app -d paradixe_soft -tAc "SELECT count(*) FROM vehicle_categories;")
+              echo "Tables=$TABLE_COUNT Roles=$ROLE_COUNT Vehicles=$VEH_COUNT"
+              test "$TABLE_COUNT" -eq 27
+              test "$ROLE_COUNT" -eq 5
+              test "$VEH_COUNT" -eq 5
