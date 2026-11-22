@@ -8,7 +8,7 @@
 </p>
 
 <p>
-  <img src="https://img.shields.io/badge/CI-Rust%20%7C%20PWA%20%7C%20PostGIS-2088FF?logo=githubactions&logoColor=white" alt="CI Ready" />
+  <a href="https://github.com/jhoaodidier/PARADIXE-SOFT/actions/workflows/ci.yml"><img src="https://github.com/jhoaodidier/PARADIXE-SOFT/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <img src="https://img.shields.io/badge/Rust-Core%20Workspace-000000?logo=rust&logoColor=white" alt="Rust Core" />
   <img src="https://img.shields.io/badge/TypeScript-PWA%20Offline--First-3178C6?logo=typescript&logoColor=white" alt="TypeScript PWA" />
   <img src="https://img.shields.io/badge/PostgreSQL%2016-PostGIS%203.4%20(3NF)-336791?logo=postgresql&logoColor=white" alt="PostgreSQL 16 + PostGIS 3.4" />
@@ -51,7 +51,7 @@ flowchart TD
     API["Backend API Rust (Axum + SQLx + OpenAPI 3.1 + RBAC/JWT)"]
     ENG["Motores CLI en Rust (ivv, consensus, routing, impact + paradixe-domain)"]
     PG["PostgreSQL 16 + PostGIS 3.4 (27 Tablas 3NF ::geography + sync_control)"]
-    S3["Almacenamiento S3 / Cloudflare R2 / MinIO (Fotos + PMTiles)"]
+    S3["Almacenamiento S3 / Cloudflare R2 / RustFS (Fotos + PMTiles)"]
 
     ACTORS --> WEB
     ACTORS --> MSG
@@ -133,7 +133,8 @@ Salida determinista esperada: `"ivv_score": "84.00"`, `"risk_level": "RED"`.
 | [`openapi/openapi-v1.json`](./openapi/openapi-v1.json) | Contrato OpenAPI 3.1.0 canónico (`/api/v1`, 22 rutas y esquemas discriminados) |
 | [`migrations/0001_initial_schema.sql`](./migrations/0001_initial_schema.sql) | Esquema PostgreSQL 16 + PostGIS 3.4 (27 tablas 3NF, índices `GiST ::geography`, `CHECK`s) |
 | [`migrations/0002_seed_base_catalogs.sql`](./migrations/0002_seed_base_catalogs.sql) | Semillas idempotentes (`sync_control`, roles RBAC, categorías vehiculares, versiones base) |
-| [`docker-compose.yml`](./docker-compose.yml) | Orquestación local de PostGIS y MinIO S3 (`paradixe-media`, `paradixe-tiles`) |
+| [`docker-compose.yml`](./docker-compose.yml) | Orquestación local de PostGIS 16 y RustFS S3 en Rust (puerto 9000 / consola 9001) |
+| [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) | Pipeline CI en GitHub Actions (Rust fmt/clippy/test, PWA Vite/Vitest y migraciones PostGIS) |
 | [`docs/PARADIXE_SOFT.md`](./docs/PARADIXE_SOFT.md) | Especificación técnica ejecutable completa (`2.0.0-prod-sdd-rust`) |
 | [`.github/PULL_REQUEST_TEMPLATE.md`](./.github/PULL_REQUEST_TEMPLATE.md) | Checklist SDD, PostGIS `::geography`, privacidad y pruebas para Pull Requests |
 | [`.agents/skills/modern-web-guidance/SKILL.md`](./.agents/skills/modern-web-guidance/SKILL.md) | Skill de estándares web modernos vinculada al desarrollo frontend |
@@ -145,7 +146,7 @@ Salida determinista esperada: `"ivv_score": "84.00"`, `"risk_level": "RED"`.
 ### 1. Requisitos del Sistema
 * **Rust** (`rustup` / `rustc` / `cargo` stable con `rustfmt` y `clippy`)
 * **Node.js** ($\ge 22$) y **npm**
-* **Docker** y **Docker Compose** (opcional en local para PostgreSQL + PostGIS y MinIO)
+* **Docker** y **Docker Compose** (opcional en local para PostgreSQL + PostGIS y RustFS)
 
 En Arch / CachyOS Linux:
 ```bash
@@ -180,7 +181,7 @@ docker compose up -d
 
 ## Hoja de Ruta de Producción
 
-- [x] **Etapa 0 — Arquitectura SDD y Base de Datos:** Especificación `2.0.0-prod-sdd-rust`, esquema PostgreSQL 16 + PostGIS 3.4 (27 tablas 3NF), semillas base e infraestructura Docker/MinIO.
+- [x] **Etapa 0 — Arquitectura SDD y Base de Datos:** Especificación `2.0.0-prod-sdd-rust`, esquema PostgreSQL 16 + PostGIS 3.4 (27 tablas 3NF), semillas base e infraestructura Docker (PostGIS + RustFS).
 - [x] **Etapa 1A — Contrato OpenAPI 3.1 y Motores CLI en Rust:** `openapi-v1.json`, Cargo Workspace con `#![forbid(unsafe_code)]`, precisión `MidpointAwayFromZero` y suite de pruebas unitarias SDD.
 - [x] **Etapa 1B — PWA Offline-First (`apps/web`):** MapLibre GL JS + PMTiles, IndexedDB atómica (`sync_control` + `outbox_queue`), rotación diaria de ID GPS, validación accesible y CI en GitHub Actions.
 - [ ] **Etapa 2 — API Core (`paradixe-api`) e Ingestor Real (`paradixe-ingestor`):** Servidor Axum/SQLx sobre PostGIS real (34 casos de integración/contrato), ingesta OSM Geofabrik + DEM SRTM/ALOS + clima cada 3 h y generación de `PMTiles` regionales.

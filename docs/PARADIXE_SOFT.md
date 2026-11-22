@@ -42,7 +42,7 @@ En regiones andino-amazónicas como **Huánuco y la Carretera Central**, el tran
 
 **TakumiSoft** adopta la **Opción A**: todo el cómputo crítico, motores geoespaciales, seguridad, ingesta y API transaccional se construyen en **Rust**, mientras la experiencia móvil y de mapa *Offline-First* se construye como **PWA en TypeScript (`React + Vite + MapLibre GL JS + PMTiles`)** con tipos y cliente autogenerados desde el contrato **OpenAPI 3.1** emitido por Rust:
 
-1. **Sostenibilidad Energética y Costo Operativo Mínimo (Rust):** Sin *Garbage Collector*, latencia predecible `< 2 s` en grafos regionales y huella mínima de CPU/RAM. Un nodo completo + PostGIS + MinIO/R2 opera con un costo mensual inicial aproximado de **$20–$40 USD/mes**, o en servidores modestos locales de un Gobierno Regional / COER.
+1. **Sostenibilidad Energética y Costo Operativo Mínimo (Rust):** Sin *Garbage Collector*, latencia predecible `< 2 s` en grafos regionales y huella mínima de CPU/RAM. Un nodo completo + PostGIS + RustFS/R2 opera con un costo mensual inicial aproximado de **$20–$40 USD/mes**, o en servidores modestos locales de un Gobierno Regional / COER.
 2. **Seguridad y Determinismo en Compilación:**
    * Tipos algebraicos (`enum`) discriminados para `VerificationState`, `PassabilityState`, `RoutingResolution`, los 11 `NoSafeRouteReasonCode` y eventos de simulacro `SimEventPayload`, eliminando estados ilegales en compilación.
    * Precisión decimal exacta mediante `rust_decimal::Decimal` con estrategia **`MidpointAwayFromZero`**, garantizando coincidencia al centésimo con `NUMERIC` de PostgreSQL.
@@ -61,7 +61,7 @@ En regiones andino-amazónicas como **Huánuco y la Carretera Central**, el tran
   1. **Backend Core, Motores e Ingestor (`paradixe-api` + crates de motores + `paradixe-ingestor`):** Servicio Rust (`Axum` + `Tokio` + `SQLx` + `utoipa` + `tracing`/OpenTelemetry) y worker periódico cada 3 horas para ingesta climática y cálculo $IVV$.
   2. **PWA Offline-First (`apps/web`):** React + Vite + TypeScript + Workbox + IndexedDB + MapLibre GL JS + PMTiles, con cliente tipado generado desde `openapi/openapi-v1.json`.
   3. **Servicio de Mensajería Multicanal (`paradixe-messaging`):** Servicio Rust basado en `trait NotificationGateway` con adaptadores reales para **WhatsApp Cloud API (Meta)** y **SMS fallback**, recepción de webhooks firmados (`HMAC-SHA256` + anti-replay $\le 5\text{ min}$) y adaptador nulo/en memoria exclusivamente bajo `#[cfg(test)]` y en el módulo de simulacros.
-  * **Soporte de Objetos S3 (`Cloudflare R2` / `MinIO`):** Almacenamiento de evidencias fotográficas (URLs prefirmadas) y archivos `PMTiles` regionales.
+  * **Soporte de Objetos S3 (`Cloudflare R2` / `RustFS`):** Almacenamiento de evidencias fotográficas (URLs prefirmadas) y archivos `PMTiles` regionales.
 
 ### 2.3 Diagrama de Arquitectura de Producción (Opción A)
 
@@ -74,7 +74,7 @@ flowchart TD
     ING["paradixe-ingestor (Worker Rust 3h: OSM Geofabrik, DEM SRTM, MTC/INGEMMET, SENAMHI/NASA GPM/Open-Meteo)"]
     ENG["Crates Motores + CLI JSON (paradixe-domain, paradixe-ivv, paradixe-consensus, paradixe-routing, paradixe-impact)"]
     PG["PostgreSQL 16 + PostGIS 3.4 (3NF ::geography + sync_control + Modulo Simulacros Aislado)"]
-    S3["Almacenamiento S3 / Cloudflare R2 / MinIO (Fotos de Reportes + PMTiles Regionales)"]
+    S3["Almacenamiento S3 / Cloudflare R2 / RustFS (Fotos de Reportes + PMTiles Regionales)"]
 
     ACTORS --> WEB
     ACTORS --> MSG
@@ -93,7 +93,7 @@ flowchart TD
 ```text
 paradixe-soft/
 ├── Cargo.toml                         # Cargo Workspace Rust
-├── docker-compose.yml                 # PostgreSQL 16 + PostGIS 3.4 + MinIO S3
+├── docker-compose.yml                 # PostgreSQL 16 + PostGIS 3.4 + RustFS S3
 ├── .env.example                       # Plantilla documentada de configuracion y secretos
 ├── migrations/
 │   ├── 0001_initial_schema.sql        # 27 tablas 3NF + GiST ::geography + CHECKs
@@ -377,7 +377,7 @@ El **núcleo operativo** cumple Tercera Forma Normal (3NF) estricta (`migrations
 | `segment_id` | UUID | FK $\rightarrow$ `road_segments(segment_id)`, NOT NULL | Tramo reportado. |
 | `proposed_passability` | VARCHAR(24) | NOT NULL | `BLOCKED`, `PARTIAL_ONE_LANE`, `OPEN`. |
 | `location_geom` | GEOMETRY(POINT, 4326) | NOT NULL | Posición de captura + índice `::geography`. |
-| `photo_uri` | VARCHAR(512) | NULLABLE | Evidencia fotográfica en S3/R2/MinIO. |
+| `photo_uri` | VARCHAR(512) | NULLABLE | Evidencia fotográfica en S3/R2/RustFS. |
 | `channel` | VARCHAR(20) | NOT NULL | `MOBILE_APP`, `WHATSAPP_BOT`, `SMS`. |
 | `validation_status` | VARCHAR(24) | NOT NULL | `PENDING`, `VERIFIED`, `REJECTED_DISTANCE`, `REJECTED_CONTRADICTED`, `STALE_ARCHIVED`. |
 | `captured_at_client` | TIMESTAMPTZ | NOT NULL | Timestamp del dispositivo. |
@@ -913,7 +913,7 @@ Para ejercicios de preparación del COER y la suite E2E (`E2E-01`), se mantiene 
 - [ ] Contratos OpenAPI 3.1 (`openapi/openapi-v1.json`) generados desde `paradixe-api` (`utoipa`) y sincronizados con el cliente TypeScript de `apps/web`.
 - [ ] Redondeo `MidpointAwayFromZero` verificado igual a PostgreSQL `NUMERIC`; `cargo clippy --all-targets -- -D warnings` y 34/34 tests en **GREEN**.
 - [ ] Datos reales cargados mediante `paradixe-ingestor` (OSM Geofabrik + DEM + MTC/INGEMMET + clima 3 h); `attributes_verified_at` estrictamente `NULL` donde falte levantamiento de campo.
-- [ ] `PMTiles` regionales generados y servidos desde S3/R2/MinIO; modo offline probado con pérdida de red en `apps/web` (`IndexedDB` + `outbox_queue` + `sync_control`).
+- [ ] `PMTiles` regionales generados y servidos desde S3/R2/RustFS; modo offline probado con pérdida de red en `apps/web` (`IndexedDB` + `outbox_queue` + `sync_control`).
 - [ ] `SIMULATOR_DATABASE_URL` configurado con rol PostgreSQL de solo lectura en tablas operativas y `NotificationGateway` real aislado de simulacros.
 - [ ] Secretos (`JWT_SECRET`, `OTP_SECRET`, llaves HMAC diarias de GPS, credenciales WhatsApp/SMS) gestionados fuera de BD (KMS/Vault/variables protegidas), observabilidad OpenTelemetry activa y respaldos automatizados de PostGIS.
 
@@ -923,7 +923,7 @@ Para ejercicios de preparación del COER y la suite E2E (`E2E-01`), se mantiene 
 
 ### 9.1 Plan de Construcción en 4 Etapas (Sin Deuda Técnica)
 
-1. **Etapa 1 — Núcleo Rust + PostGIS Productivo:** Inicializar Cargo Workspace (`paradixe-domain`, `paradixe-ivv`, `paradixe-consensus`, `paradixe-routing`, `paradixe-impact`, `paradixe-api`), ejecutar `docker-compose.yml` (PostgreSQL/PostGIS + MinIO), aplicar migraciones, generar `openapi-v1.json` y llevar los 34 tests SDD de **RED** a **GREEN**.
+1. **Etapa 1 — Núcleo Rust + PostGIS Productivo:** Inicializar Cargo Workspace (`paradixe-domain`, `paradixe-ivv`, `paradixe-consensus`, `paradixe-routing`, `paradixe-impact`, `paradixe-api`), ejecutar `docker-compose.yml` (PostgreSQL/PostGIS + RustFS), aplicar migraciones, generar `openapi-v1.json` y llevar los 34 tests SDD de **RED** a **GREEN**.
 2. **Etapa 2 — Pipeline de Datos Reales de Huánuco (`paradixe-ingestor`) + PMTiles:** Importar corredor vial real de Huánuco desde OpenStreetMap (Geofabrik Perú), calcular pendientes reales desde DEM (SRTM/ALOS), cruzar puntos críticos MTC/INGEMMET, activar worker climático cada 3 h (`OPEN_METEO` / `NASA_GPM` / `SENAMHI`) y generar archivo `PMTiles` regional.
 3. **Etapa 3 — PWA Offline-First (`apps/web`) + Mensajería Real (`paradixe-messaging`):** Implementar la aplicación web instalable en TypeScript (`React + Vite + MapLibre GL JS + PMTiles + Workbox + IndexedDB`), flujo offline de reportes y panel institucional COER/Defensa Civil/SAMU, conectando **WhatsApp Cloud API** y fallback SMS mediante `trait NotificationGateway`.
 4. **Etapa 4 — Piloto Operativo B2B/B2G y Calibración:** Despliegue productivo inicial, piloto controlado en Huánuco–Carpish–Tingo María con gremios agrícolas/transporte y COER, observabilidad en campo, calibración empírica de $IVV$ v2.0 y preparación de app móvil nativa (Fase posterior) si se requiere telemetría continua en segundo plano.
