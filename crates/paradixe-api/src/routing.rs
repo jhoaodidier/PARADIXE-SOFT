@@ -959,3 +959,194 @@ pub async fn create_humanitarian_window(
         }),
     ))
 }
+
+#[derive(Debug, Serialize)]
+pub struct TransferCorridorSummaryDto {
+    pub corridor_id: Uuid,
+    pub side_a_node_id: Uuid,
+    pub side_b_node_id: Uuid,
+    pub length_m: i32,
+    #[serde(with = "rust_decimal::serde::float")]
+    pub max_slope_pct: Decimal,
+    pub transfer_mode: String,
+    #[serde(with = "rust_decimal::serde::float")]
+    pub max_safe_ivv: Decimal,
+    pub is_verified_safe: bool,
+    pub last_inspected_at: DateTime<Utc>,
+    pub inspection_valid_days: i16,
+    pub requires_revalidation: bool,
+    pub cargo_types: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LogisticBridgeSummaryDto {
+    pub bridge_id: Uuid,
+    pub incident_id: Uuid,
+    pub corridor_id: Uuid,
+    pub cargo_type: String,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HumanitarianWindowSummaryDto {
+    pub window_id: Uuid,
+    pub incident_id: Uuid,
+    pub vehicle_category_id: Uuid,
+    pub vehicle_category_code: String,
+    pub direction: String,
+    pub starts_at: DateTime<Utc>,
+    pub ends_at: DateTime<Utc>,
+    pub status: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VehicleCategoryDto {
+    pub category_id: Uuid,
+    pub code: String,
+    #[serde(with = "rust_decimal::serde::float")]
+    pub max_slope_pct: Decimal,
+    #[serde(with = "rust_decimal::serde::float")]
+    pub min_road_width_m: Decimal,
+    #[serde(with = "rust_decimal::serde::float")]
+    pub max_weight_tons: Decimal,
+    pub allows_dirt_track: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BridgesOperationsResponse {
+    pub transfer_corridors: Vec<TransferCorridorSummaryDto>,
+    pub bridges: Vec<LogisticBridgeSummaryDto>,
+    pub humanitarian_windows: Vec<HumanitarianWindowSummaryDto>,
+    pub vehicle_categories: Vec<VehicleCategoryDto>,
+}
+
+pub async fn list_bridges_and_windows(
+    State(state): State<AppState>,
+) -> Result<Json<BridgesOperationsResponse>, ApiError> {
+    let cap_rows = sqlx::query(
+        "SELECT corridor_id, cargo_type FROM transfer_corridor_capabilities ORDER BY cargo_type ASC",
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(ApiError::from_db)?;
+
+    let mut caps_map: HashMap<Uuid, Vec<String>> = HashMap::new();
+    for r in cap_rows {
+        let cid: Uuid = r.try_get("corridor_id").map_err(ApiError::from_db)?;
+        let ctype: String = r.try_get("cargo_type").map_err(ApiError::from_db)?;
+        caps_map.entry(cid).or_default().push(ctype);
+    }
+
+    let corr_rows = sqlx::query(
+        "SELECT corridor_id, side_a_node_id, side_b_node_id, length_m, max_slope_pct,
+                transfer_mode, max_safe_ivv, is_verified_safe, last_inspected_at,
+                inspection_valid_days, requires_revalidation
+         FROM transfer_corridors
+         ORDER BY last_inspected_at DESC, corridor_id ASC",
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(ApiError::from_db)?;
+
+    let mut transfer_corridors = Vec::with_capacity(corr_rows.len());
+    for r in corr_rows {
+        let cid: Uuid = r.try_get("corridor_id").map_err(ApiError::from_db)?;
+        transfer_corridors.push(TransferCorridorSummaryDto {
+            corridor_id: cid,
+            side_a_node_id: r.try_get("side_a_node_id").map_err(ApiError::from_db)?,
+            side_b_node_id: r.try_get("side_b_node_id").map_err(ApiError::from_db)?,
+            length_m: r.try_get("length_m").map_err(ApiError::from_db)?,
+            max_slope_pct: r.try_get("max_slope_pct").map_err(ApiError::from_db)?,
+            transfer_mode: r.try_get("transfer_mode").map_err(ApiError::from_db)?,
+            max_safe_ivv: r.try_get("max_safe_ivv").map_err(ApiError::from_db)?,
+            is_verified_safe: r.try_get("is_verified_safe").map_err(ApiError::from_db)?,
+            last_inspected_at: r.try_get("last_inspected_at").map_err(ApiError::from_db)?,
+            inspection_valid_days: r
+                .try_get("inspection_valid_days")
+                .map_err(ApiError::from_db)?,
+            requires_revalidation: r
+                .try_get("requires_revalidation")
+                .map_err(ApiError::from_db)?,
+            cargo_types: caps_map.remove(&cid).unwrap_or_default(),
+        });
+    }
+
+    let bridge_rows = sqlx::query(
+        "SELECT bridge_id, incident_id, corridor_id, cargo_type, status, created_at
+         FROM logistic_bridges
+         ORDER BY created_at DESC, bridge_id ASC",
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(ApiError::from_db)?;
+
+    let mut bridges = Vec::with_capacity(bridge_rows.len());
+    for r in bridge_rows {
+        bridges.push(LogisticBridgeSummaryDto {
+            bridge_id: r.try_get("bridge_id").map_err(ApiError::from_db)?,
+            incident_id: r.try_get("incident_id").map_err(ApiError::from_db)?,
+            corridor_id: r.try_get("corridor_id").map_err(ApiError::from_db)?,
+            cargo_type: r.try_get("cargo_type").map_err(ApiError::from_db)?,
+            status: r.try_get("status").map_err(ApiError::from_db)?,
+            created_at: r.try_get("created_at").map_err(ApiError::from_db)?,
+        });
+    }
+
+    let win_rows = sqlx::query(
+        "SELECT hw.window_id, hw.incident_id, hw.vehicle_category_id, vc.code AS vehicle_category_code,
+                hw.direction, hw.starts_at, hw.ends_at, hw.status
+         FROM humanitarian_windows hw
+         JOIN vehicle_categories vc ON vc.category_id = hw.vehicle_category_id
+         ORDER BY hw.starts_at DESC, hw.window_id ASC",
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(ApiError::from_db)?;
+
+    let mut humanitarian_windows = Vec::with_capacity(win_rows.len());
+    for r in win_rows {
+        humanitarian_windows.push(HumanitarianWindowSummaryDto {
+            window_id: r.try_get("window_id").map_err(ApiError::from_db)?,
+            incident_id: r.try_get("incident_id").map_err(ApiError::from_db)?,
+            vehicle_category_id: r
+                .try_get("vehicle_category_id")
+                .map_err(ApiError::from_db)?,
+            vehicle_category_code: r
+                .try_get("vehicle_category_code")
+                .map_err(ApiError::from_db)?,
+            direction: r.try_get("direction").map_err(ApiError::from_db)?,
+            starts_at: r.try_get("starts_at").map_err(ApiError::from_db)?,
+            ends_at: r.try_get("ends_at").map_err(ApiError::from_db)?,
+            status: r.try_get("status").map_err(ApiError::from_db)?,
+        });
+    }
+
+    let vc_rows = sqlx::query(
+        "SELECT category_id, code, max_slope_pct, min_road_width_m, max_weight_tons, allows_dirt_track
+         FROM vehicle_categories
+         ORDER BY priority_tier ASC, code ASC",
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(ApiError::from_db)?;
+
+    let mut vehicle_categories = Vec::with_capacity(vc_rows.len());
+    for r in vc_rows {
+        vehicle_categories.push(VehicleCategoryDto {
+            category_id: r.try_get("category_id").map_err(ApiError::from_db)?,
+            code: r.try_get("code").map_err(ApiError::from_db)?,
+            max_slope_pct: r.try_get("max_slope_pct").map_err(ApiError::from_db)?,
+            min_road_width_m: r.try_get("min_road_width_m").map_err(ApiError::from_db)?,
+            max_weight_tons: r.try_get("max_weight_tons").map_err(ApiError::from_db)?,
+            allows_dirt_track: r.try_get("allows_dirt_track").map_err(ApiError::from_db)?,
+        });
+    }
+
+    Ok(Json(BridgesOperationsResponse {
+        transfer_corridors,
+        bridges,
+        humanitarian_windows,
+        vehicle_categories,
+    }))
+}

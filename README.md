@@ -195,6 +195,18 @@ cargo run --release -p paradixe-ingestor -- sync-all --region PE-CUSTOM --bbox "
 cargo run --release -p paradixe-ingestor -- weather-sync --region PE-HUC --interval-hours 3
 ```
 
+### 6. Consola Web en Vivo (API + RustFS PMTiles + PWA)
+```bash
+# 1. Crear usuarios operadores locales (COER_ADMIN, CIVIL_DEFENSE, HEALTH_OPERATOR)
+cargo run -p paradixe-api --bin seed_dev_users
+
+# 2. Levantar API Core en http://127.0.0.1:8080
+cargo run -p paradixe-api --bin paradixe-api
+
+# 3. Levantar PWA con proxy hacia /api y /tiles (http://localhost:5173)
+cd apps/web && npm install && npm run dev
+```
+
 ---
 
 ## Hoja de Ruta de Producción

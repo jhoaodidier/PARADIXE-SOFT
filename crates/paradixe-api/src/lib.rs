@@ -142,12 +142,13 @@ async fn openapi_handler() -> impl IntoResponse {
 pub fn build_router(state: AppState) -> Router {
     let api_v1 = Router::new()
         .route("/openapi.json", get(openapi_handler))
-        // Auth (5)
+        // Auth (6)
         .route("/auth/otp/request", post(auth::request_otp))
         .route("/auth/login", post(auth::login))
         .route("/auth/refresh", post(auth::refresh_session))
         .route("/auth/logout", post(auth::logout))
         .route("/auth/revoke-all", post(auth::revoke_all_sessions))
+        .route("/auth/me", get(auth::get_me))
         // Sync (2)
         .route("/sync/snapshot", get(sync::get_sync_snapshot))
         .route("/sync/batch", post(sync::post_sync_batch))
@@ -155,19 +156,24 @@ pub fn build_router(state: AppState) -> Router {
         .route("/corridors/map", get(corridors::get_corridors_map))
         .route("/regions", get(corridors::get_regions))
         .route("/ivv/recalculate", post(corridors::recalculate_ivv))
-        // Telemetry, Field Reports, Webhooks & Incidents (4)
+        // Telemetry, Field Reports, Webhooks & Incidents (5)
         .route("/telemetry/pings", post(incidents::ingest_telemetry_pings))
         .route("/reports", post(incidents::create_field_report))
         .route(
             "/webhooks/messaging",
             post(incidents::receive_messaging_webhook),
         )
+        .route("/incidents", get(incidents::list_incidents))
         .route(
             "/incidents/{incident_id}/verification",
             patch(incidents::verify_incident),
         )
-        // Routing, Logistic Bridges & Humanitarian Windows (4)
+        // Routing, Logistic Bridges & Humanitarian Windows (5)
         .route("/routing/calculate", post(routing::calculate_route_handler))
+        .route(
+            "/operations/bridges",
+            get(routing::list_bridges_and_windows),
+        )
         .route("/bridges", post(routing::propose_logistic_bridge))
         .route(
             "/bridges/{bridge_id}/status",

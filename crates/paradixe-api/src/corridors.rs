@@ -161,6 +161,10 @@ pub struct TerritorialUnitDto {
     pub admin_level: i16,
     pub center_lon: f64,
     pub center_lat: f64,
+    pub min_lon: f64,
+    pub min_lat: f64,
+    pub max_lon: f64,
+    pub max_lat: f64,
     pub pmtiles_uri: Option<String>,
     pub segment_count: i64,
 }
@@ -183,6 +187,10 @@ pub async fn get_regions(
             tu.admin_level,
             ST_X(tu.centroid_geom) AS center_lon,
             ST_Y(tu.centroid_geom) AS center_lat,
+            ST_XMin(tu.bbox_geom) AS min_lon,
+            ST_YMin(tu.bbox_geom) AS min_lat,
+            ST_XMax(tu.bbox_geom) AS max_lon,
+            ST_YMax(tu.bbox_geom) AS max_lat,
             tu.pmtiles_uri,
             (
                 SELECT count(*)
@@ -212,6 +220,10 @@ pub async fn get_regions(
             admin_level: row.try_get("admin_level").map_err(ApiError::from_db)?,
             center_lon: row.try_get("center_lon").map_err(ApiError::from_db)?,
             center_lat: row.try_get("center_lat").map_err(ApiError::from_db)?,
+            min_lon: row.try_get("min_lon").map_err(ApiError::from_db)?,
+            min_lat: row.try_get("min_lat").map_err(ApiError::from_db)?,
+            max_lon: row.try_get("max_lon").map_err(ApiError::from_db)?,
+            max_lat: row.try_get("max_lat").map_err(ApiError::from_db)?,
             pmtiles_uri: row.try_get("pmtiles_uri").map_err(ApiError::from_db)?,
             segment_count: row.try_get("segment_count").map_err(ApiError::from_db)?,
         });

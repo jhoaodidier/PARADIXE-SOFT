@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent } from "react";
+import { useId, useMemo, useState, type FormEvent } from "react";
 import {
   ApiClientError,
   postRoutingCalculate,
@@ -54,20 +54,15 @@ const REASON_DESCRIPTIONS: Record<NoSafeRouteReasonCode, string> = {
     "No existe conectividad verificada entre el nodo de origen y destino.",
 };
 
+const MAX_SELECT_OPTIONS = 150;
+
 export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProps) {
   const formTitleId = useId();
+  const nodeFilterId = useId();
   const payloadErrorId = useId();
   const payloadHintId = useId();
 
-  const nodeOptions = Array.from(
-    new Map(
-      features.flatMap((f) => [
-        [f.properties.origin_node_id, `Nodo origen (${f.properties.corridor_name})`],
-        [f.properties.destination_node_id, `Nodo destino (${f.properties.corridor_name})`],
-      ])
-    ).entries()
-  );
-
+  const [nodeFilter, setNodeFilter] = useState("");
   const [originNodeId, setOriginNodeId] = useState("");
   const [destinationNodeId, setDestinationNodeId] = useState("");
   const [vehicleCode, setVehicleCode] = useState<VehicleCategoryCode>("AMBULANCE_4X4");
@@ -77,9 +72,51 @@ export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProp
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [result, setResult] = useState<RoutingCalculateResponse | null>(null);
 
-  const effectiveOrigin = originNodeId || nodeOptions[0]?.[0] || "";
+  const allNodeOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const f of features) {
+      if (!map.has(f.properties.origin_node_id)) {
+        map.set(f.properties.origin_node_id, `Nodo origen (${f.properties.corridor_name})`);
+      }
+      if (!map.has(f.properties.destination_node_id)) {
+        map.set(
+          f.properties.destination_node_id,
+          `Nodo destino (${f.properties.corridor_name})`
+        );
+      }
+    }
+    return Array.from(map.entries());
+  }, [features]);
+
+  const effectiveOrigin = originNodeId || allNodeOptions[0]?.[0] || "";
   const effectiveDest =
-    destinationNodeId || nodeOptions[nodeOptions.length - 1]?.[0] || nodeOptions[0]?.[0] || "";
+    destinationNodeId ||
+    allNodeOptions[allNodeOptions.length - 1]?.[0] ||
+    allNodeOptions[0]?.[0] ||
+    "";
+
+  const { visibleNodes, totalMatching } = useMemo(() => {
+    const q = nodeFilter.trim().toLowerCase();
+    const matching =
+      q.length === 0
+        ? allNodeOptions
+        : allNodeOptions.filter(
+            ([id, label]) =>
+              label.toLowerCase().includes(q) || id.toLowerCase().includes(q)
+          );
+    const sliced = matching.slice(0, MAX_SELECT_OPTIONS);
+    const seen = new Set(sliced.map(([id]) => id));
+    for (const selectedId of [effectiveOrigin, effectiveDest]) {
+      if (selectedId && !seen.has(selectedId)) {
+        const found = allNodeOptions.find(([id]) => id === selectedId);
+        if (found) {
+          sliced.unshift(found);
+          seen.add(selectedId);
+        }
+      }
+    }
+    return { visibleNodes: sliced, totalMatching: matching.length };
+  }, [allNodeOptions, nodeFilter, effectiveOrigin, effectiveDest]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -140,6 +177,23 @@ export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProp
 
       <form onSubmit={handleSubmit} aria-labelledby={formTitleId}>
         <div className="field">
+          <label htmlFor={nodeFilterId}>Filtrar nodos por corredor</label>
+          <input
+            id={nodeFilterId}
+            type="search"
+            placeholder="Ej. Carpish, Tingo María, Ambo..."
+            value={nodeFilter}
+            onChange={(e) => setNodeFilter(e.target.value)}
+          />
+          {totalMatching > MAX_SELECT_OPTIONS && (
+            <span className="hint">
+              Mostrando {visibleNodes.length} de {totalMatching} nodos; afine la búsqueda para
+              reducir la lista.
+            </span>
+          )}
+        </div>
+
+        <div className="field">
           <label htmlFor="route-origin">Nodo origen</label>
           <select
             id="route-origin"
@@ -149,10 +203,10 @@ export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProp
             onChange={(e) => setOriginNodeId(e.target.value)}
             data-error="origin-error"
           >
-            {nodeOptions.length === 0 ? (
+            {visibleNodes.length === 0 ? (
               <option value="">Sin nodos disponibles</option>
             ) : (
-              nodeOptions.map(([id, label]) => (
+              visibleNodes.map(([id, label]) => (
                 <option key={id} value={id}>
                   {label}
                 </option>
@@ -177,10 +231,10 @@ export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProp
             onChange={(e) => setDestinationNodeId(e.target.value)}
             data-error="dest-error"
           >
-            {nodeOptions.length === 0 ? (
+            {visibleNodes.length === 0 ? (
               <option value="">Sin nodos disponibles</option>
             ) : (
-              nodeOptions.map(([id, label]) => (
+              visibleNodes.map(([id, label]) => (
                 <option key={id} value={id}>
                   {label}
                 </option>
@@ -261,7 +315,7 @@ export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProp
         <button
           type="submit"
           className="btn btn--primary"
-          disabled={submitting || !isOnline || nodeOptions.length === 0}
+          disabled={submitting || !isOnline || allNodeOptions.length === 0}
         >
           {submitting ? "Evaluando ruta segura..." : "Calcular ruta verificable"}
         </button>
@@ -307,7 +361,9 @@ export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProp
             <div>
               <p>
                 <strong>Puente Logístico Propuesto (PROPOSED)</strong> —{" "}
-                <strong>Autorización operativa: {result.bridge_proposal.operational_authorization}</strong>
+                <strong>
+                  Autorización operativa: {result.bridge_proposal.operational_authorization}
+                </strong>
               </p>
               <p className="hint">
                 Modo: {result.bridge_proposal.transfer_mode} · Longitud:{" "}
@@ -328,6 +384,14 @@ export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProp
                 </p>
               </div>
             </div>
+          )}
+
+          {result.warnings && result.warnings.length > 0 && (
+            <ul className="hint" style={{ marginBlockStart: "0.75rem", paddingInlineStart: "1.2rem" }}>
+              {result.warnings.map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
           )}
         </div>
       )}

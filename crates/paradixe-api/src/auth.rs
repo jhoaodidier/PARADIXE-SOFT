@@ -16,6 +16,7 @@ use chrono::{DateTime, Duration, Utc};
 use hmac::{Hmac, Mac};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use rand::RngCore;
+use rust_decimal::Decimal;
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -679,6 +680,45 @@ pub async fn revoke_all_sessions(
 
     tx.commit().await.map_err(ApiError::from_db)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Serialize)]
+pub struct AuthMeResponse {
+    pub user_id: Uuid,
+    pub phone_e164: String,
+    pub full_name: String,
+    pub role_code: RoleCode,
+    #[serde(with = "rust_decimal::serde::float")]
+    pub reputation_score: Decimal,
+}
+
+pub async fn get_me(
+    State(state): State<AppState>,
+    auth: AuthUser,
+) -> Result<Json<AuthMeResponse>, ApiError> {
+    let row = sqlx::query(
+        "SELECT u.user_id, u.phone_e164, u.full_name, u.reputation_score, r.code AS role_code
+         FROM users u
+         JOIN roles r ON r.role_id = u.role_id
+         WHERE u.user_id = $1 AND u.is_active = TRUE",
+    )
+    .bind(auth.user_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(ApiError::from_db)?
+    .ok_or_else(|| ApiError::unauthorized("User account is missing or inactive"))?;
+
+    let role_str: String = row.try_get("role_code").map_err(ApiError::from_db)?;
+    let role_code =
+        RoleCode::parse(&role_str).ok_or_else(|| ApiError::internal("Unsupported role"))?;
+
+    Ok(Json(AuthMeResponse {
+        user_id: row.try_get("user_id").map_err(ApiError::from_db)?,
+        phone_e164: row.try_get("phone_e164").map_err(ApiError::from_db)?,
+        full_name: row.try_get("full_name").map_err(ApiError::from_db)?,
+        role_code,
+        reputation_score: row.try_get("reputation_score").map_err(ApiError::from_db)?,
+    }))
 }
 
 #[cfg(test)]

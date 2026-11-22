@@ -31,6 +31,10 @@ echo "Applying migrations/0003_territorial_regions_and_osm_lineage.sql..."
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0003_territorial_regions_and_osm_lineage.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0003_territorial_regions_and_osm_lineage.sql
 
+echo "Applying migrations/0004_simulator_fixture_segment_isolation.sql..."
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0004_simulator_fixture_segment_isolation.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0004_simulator_fixture_segment_isolation.sql
+
 DB_NAME="$(python3 -c 'import os, urllib.parse; u = urllib.parse.urlparse(os.environ["DATABASE_URL"]); print(u.path.lstrip("/") or "paradixe_soft")')"
 SIM_USER="$(python3 -c 'import os, urllib.parse; u = urllib.parse.urlparse(os.environ["SIMULATOR_DATABASE_URL"]); print(u.username or "paradixe_sim_ro")')"
 SIM_PASS="$(python3 -c 'import os, urllib.parse; u = urllib.parse.urlparse(os.environ["SIMULATOR_DATABASE_URL"]); print(urllib.parse.unquote(u.password or ""))')"

@@ -9,6 +9,21 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": "http://127.0.0.1:8080",
+      "/tiles": {
+        target: "http://127.0.0.1:9000",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/tiles/, "/paradixe-tiles"),
+      },
+    },
+  },
+  preview: {
+    proxy: {
+      "/api": "http://127.0.0.1:8080",
+      "/tiles": {
+        target: "http://127.0.0.1:9000",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/tiles/, "/paradixe-tiles"),
+      },
     },
   },
   plugins: [

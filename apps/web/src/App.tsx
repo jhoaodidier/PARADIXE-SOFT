@@ -1,16 +1,34 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
+  fetchAuthMe,
+  fetchBridgesOperations,
   fetchCorridorsMap,
+  fetchIncidents,
+  fetchRegions,
   fetchSyncSnapshot,
+  getOrCreateDeviceId,
+  postAuthLogout,
+  postAuthRefresh,
   postSyncBatch,
+  type AuthMeResponse,
+  type AuthTokenResponse,
+  type BridgesOperationsResponse,
   type CorridorSegmentFeature,
+  type IncidentListItem,
+  type TerritorialUnit,
 } from "./api/client.ts";
+import { AuthModal } from "./components/AuthModal.tsx";
+import { BridgesPanel } from "./components/BridgesPanel.tsx";
 import { CorridorMap } from "./components/CorridorMap.tsx";
 import { FieldReportModal } from "./components/FieldReportModal.tsx";
+import { IncidentsPanel } from "./components/IncidentsPanel.tsx";
+import { OperationalTabs, type TabDefinition } from "./components/OperationalTabs.tsx";
+import { RegionSelectorBar } from "./components/RegionSelectorBar.tsx";
 import { RiskBadge } from "./components/RiskBadge.tsx";
 import { RoutingPanel } from "./components/RoutingPanel.tsx";
 import { SettingsModal } from "./components/SettingsModal.tsx";
+import { SimulatorPanel } from "./components/SimulatorPanel.tsx";
 import { ToastRegion, type ToastMessage } from "./components/ToastRegion.tsx";
 import {
   applySyncSnapshotAtomic,
@@ -25,6 +43,7 @@ import {
   type OutboxReportRecord,
   type SyncMetaRecord,
 } from "./offline/db.ts";
+import { ensureFocusgroupPolyfill } from "./utils/focusgroup.ts";
 import { initFormAriaSync } from "./utils/formAriaSync.ts";
 import {
   applyThemePreference,
@@ -37,6 +56,26 @@ import { ensurePopoverPolyfill } from "./utils/topLayer.ts";
 
 export interface AppProps {
   initialFeatures?: CorridorSegmentFeature[];
+}
+
+function readStoredToken(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredToken(key: string, value: string | null): void {
+  try {
+    if (value === null) {
+      localStorage.removeItem(key);
+    } else {
+      localStorage.setItem(key, value);
+    }
+  } catch {
+    // Ignore storage errors inside restricted contexts
+  }
 }
 
 export function App({ initialFeatures }: AppProps) {
@@ -54,22 +93,45 @@ export function App({ initialFeatures }: AppProps) {
   });
   const [queuedReports, setQueuedReports] = useState<OutboxReportRecord[]>([]);
   const [ephemeralRecord, setEphemeralRecord] = useState<EphemeralTelemetryRecord | null>(null);
+
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
   const [themePreference, setThemePreference] = useState<ThemePreference>(() =>
     readStoredThemePreference()
   );
   const [systemScheme, setSystemScheme] = useState<"light" | "dark">(() =>
     getSystemResolvedScheme()
   );
-  const [authToken] = useState<string | null>(() => {
-    try {
-      return localStorage.getItem("paradixe_access_token");
-    } catch {
-      return null;
-    }
-  });
+
+  const [authToken, setAuthToken] = useState<string | null>(() =>
+    readStoredToken("paradixe_access_token")
+  );
+  const [refreshToken, setRefreshToken] = useState<string | null>(() =>
+    readStoredToken("paradixe_refresh_token")
+  );
+  const [currentUser, setCurrentUser] = useState<AuthMeResponse | null>(null);
+
+  const [territorialUnits, setTerritorialUnits] = useState<TerritorialUnit[]>([]);
+  const [selectedRegionCode, setSelectedRegionCode] = useState<string>("PE-HUC");
+  const [selectedProvinceUnitId, setSelectedProvinceUnitId] = useState<string>("");
+  const [selectedDistrictUnitId, setSelectedDistrictUnitId] = useState<string>("");
+  const [loadingMap, setLoadingMap] = useState(false);
+
+  const [incidents, setIncidents] = useState<IncidentListItem[]>([]);
+  const [bridgesOperations, setBridgesOperations] = useState<BridgesOperationsResponse | null>(
+    null
+  );
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const pushToast = useCallback((text: string) => {
     setToasts((prev) => [...prev.slice(-2), { id: crypto.randomUUID(), text }]);
@@ -79,6 +141,14 @@ export function App({ initialFeatures }: AppProps) {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
+  const clearSession = useCallback(() => {
+    writeStoredToken("paradixe_access_token", null);
+    writeStoredToken("paradixe_refresh_token", null);
+    setAuthToken(null);
+    setRefreshToken(null);
+    setCurrentUser(null);
+  }, []);
+
   const refreshLocalState = useCallback(async () => {
     const [cached, meta, queued, ephemeral] = await Promise.all([
       getCachedCorridors(),
@@ -86,6 +156,7 @@ export function App({ initialFeatures }: AppProps) {
       getQueuedReports(),
       getOrRotateDailyEphemeralId(),
     ]);
+    if (!mountedRef.current) return;
     if (cached.length > 0) {
       setFeatures(cached);
       setSelectedSegmentId((prev) => prev ?? cached[0]?.properties.segment_id ?? null);
@@ -95,13 +166,77 @@ export function App({ initialFeatures }: AppProps) {
     setEphemeralRecord(ephemeral);
   }, []);
 
-  const syncWithServer = useCallback(async () => {
+  const refreshOperations = useCallback(async () => {
     if (typeof navigator !== "undefined" && !navigator.onLine) return;
     try {
-      const mapData = await fetchCorridorsMap(authToken);
+      const [incResp, bridgeResp] = await Promise.all([
+        fetchIncidents({ limit: 100 }),
+        fetchBridgesOperations(),
+      ]);
+      if (!mountedRef.current) return;
+      if (incResp?.incidents) {
+        setIncidents(incResp.incidents);
+      }
+      if (bridgeResp) {
+        setBridgesOperations(bridgeResp);
+      }
+    } catch {
+      // Silencio seguro en modo offline o respuestas simuladas
+    }
+  }, []);
+
+  const selectedUnitForBbox = useMemo(() => {
+    if (selectedDistrictUnitId) {
+      return territorialUnits.find((u) => u.unit_id === selectedDistrictUnitId) ?? null;
+    }
+    if (selectedProvinceUnitId) {
+      return territorialUnits.find((u) => u.unit_id === selectedProvinceUnitId) ?? null;
+    }
+    return null;
+  }, [territorialUnits, selectedProvinceUnitId, selectedDistrictUnitId]);
+
+  const activeRegionUnit = useMemo(() => {
+    return (
+      territorialUnits.find(
+        (u) => u.admin_level === 4 && (u.iso_code ?? u.ubigeo_code) === selectedRegionCode
+      ) ?? null
+    );
+  }, [territorialUnits, selectedRegionCode]);
+
+  const syncWithServer = useCallback(async () => {
+    if (typeof navigator !== "undefined" && !navigator.onLine) return;
+    setLoadingMap(true);
+    try {
+      const regResp = await fetchRegions().catch(() => null);
+      if (!mountedRef.current) return;
+      if (regResp?.regions && regResp.regions.length > 0) {
+        setTerritorialUnits(regResp.regions);
+      }
+
+      const bboxParam = selectedUnitForBbox
+        ? `${selectedUnitForBbox.min_lon},${selectedUnitForBbox.min_lat},${selectedUnitForBbox.max_lon},${selectedUnitForBbox.max_lat}`
+        : undefined;
+
+      const mapData = await fetchCorridorsMap(authToken, {
+        region: selectedRegionCode,
+        bbox: bboxParam,
+        limit: 2500,
+      });
+
       const nowIso = new Date().toISOString();
       await replaceCorridorCache(mapData.features, nowIso);
+      if (!mountedRef.current) return;
       setFeatures(mapData.features);
+      if (mapData.features.length > 0) {
+        setSelectedSegmentId((prev) =>
+          prev && mapData.features.some((f) => f.properties.segment_id === prev)
+            ? prev
+            : mapData.features[0].properties.segment_id
+        );
+      }
+
+      await refreshOperations();
+      if (!mountedRef.current) return;
 
       if (authToken) {
         const meta = await getSyncMeta();
@@ -134,17 +269,31 @@ export function App({ initialFeatures }: AppProps) {
                   : "REJECTED",
             }))
           );
-          pushToast("Cola offline sincronizada correctamente con el servidor.");
+          if (mountedRef.current) {
+            pushToast("Cola offline sincronizada correctamente con el servidor.");
+          }
         }
       }
       await refreshLocalState();
     } catch {
       // Mantiene lectura de cache local si el backend no esta accesible
+    } finally {
+      if (mountedRef.current) {
+        setLoadingMap(false);
+      }
     }
-  }, [authToken, pushToast, refreshLocalState]);
+  }, [
+    authToken,
+    pushToast,
+    refreshLocalState,
+    refreshOperations,
+    selectedRegionCode,
+    selectedUnitForBbox,
+  ]);
 
   useEffect(() => {
     ensurePopoverPolyfill();
+    ensureFocusgroupPolyfill();
     const cleanupAria = initFormAriaSync(document);
     const unsubscribeTheme = subscribeThemeChanges((pref, sys) => {
       setThemePreference(pref);
@@ -157,7 +306,46 @@ export function App({ initialFeatures }: AppProps) {
   }, []);
 
   useEffect(() => {
-    void refreshLocalState().then(() => syncWithServer());
+    let cancelled = false;
+    async function restoreSession() {
+      if (!authToken) {
+        setCurrentUser(null);
+        return;
+      }
+      try {
+        const me = await fetchAuthMe(authToken);
+        if (!cancelled) setCurrentUser(me);
+      } catch {
+        if (refreshToken) {
+          try {
+            const refreshed = await postAuthRefresh(refreshToken, getOrCreateDeviceId());
+            if (cancelled) return;
+            writeStoredToken("paradixe_access_token", refreshed.access_token);
+            writeStoredToken("paradixe_refresh_token", refreshed.refresh_token);
+            setAuthToken(refreshed.access_token);
+            setRefreshToken(refreshed.refresh_token);
+            const me = await fetchAuthMe(refreshed.access_token);
+            if (!cancelled) setCurrentUser(me);
+            return;
+          } catch {
+            // Token invalido o revocado
+          }
+        }
+        if (!cancelled) clearSession();
+      }
+    }
+    void restoreSession();
+    return () => {
+      cancelled = true;
+    };
+  }, [authToken, refreshToken, clearSession]);
+
+  useEffect(() => {
+    void refreshLocalState().then(() => {
+      if (mountedRef.current) {
+        void syncWithServer();
+      }
+    });
 
     const onOnline = () => {
       setIsOnline(true);
@@ -180,11 +368,110 @@ export function App({ initialFeatures }: AppProps) {
     setThemePreference(pref);
   };
 
+  const handleAuthenticated = (tokens: AuthTokenResponse, user: AuthMeResponse) => {
+    writeStoredToken("paradixe_access_token", tokens.access_token);
+    writeStoredToken("paradixe_refresh_token", tokens.refresh_token);
+    setAuthToken(tokens.access_token);
+    setRefreshToken(tokens.refresh_token);
+    setCurrentUser(user);
+    pushToast(`Sesión iniciada: ${user.full_name} (${user.role_code}).`);
+  };
+
+  const handleLogout = async () => {
+    if (authToken && refreshToken) {
+      await postAuthLogout(refreshToken, getOrCreateDeviceId(), authToken).catch(() => {});
+    }
+    clearSession();
+    pushToast("Sesión institucional cerrada.");
+  };
+
+  const handleSelectRegion = (code: string) => {
+    setSelectedRegionCode(code);
+    setSelectedProvinceUnitId("");
+    setSelectedDistrictUnitId("");
+  };
+
+  const handleSelectProvince = (unitId: string) => {
+    setSelectedProvinceUnitId(unitId);
+    setSelectedDistrictUnitId("");
+  };
+
   const hasStaleData = features.some(
     (f) => f.properties.is_stale || isAssessmentStale(f.properties.calculated_at)
   );
   const selectedFeature =
     features.find((f) => f.properties.segment_id === selectedSegmentId) ?? features[0] ?? null;
+
+  const focusBounds = useMemo<[[number, number], [number, number]] | null>(() => {
+    const unit = selectedUnitForBbox ?? activeRegionUnit;
+    if (!unit) return null;
+    if (unit.min_lon >= unit.max_lon || unit.min_lat >= unit.max_lat) return null;
+    return [
+      [unit.min_lon, unit.min_lat],
+      [unit.max_lon, unit.max_lat],
+    ];
+  }, [selectedUnitForBbox, activeRegionUnit]);
+
+  const resolvedScheme = themePreference === "system" ? systemScheme : themePreference;
+  const activeRegionLabel =
+    selectedUnitForBbox?.name ?? activeRegionUnit?.name ?? `Región ${selectedRegionCode}`;
+
+  const operationalTabs: TabDefinition[] = [
+    {
+      id: "routing",
+      label: "Enrutamiento",
+      content: <RoutingPanel features={features} isOnline={isOnline} authToken={authToken} />,
+    },
+    {
+      id: "incidents",
+      label: "Incidentes",
+      badge: incidents.filter(
+        (i) => i.verification_state === "SUSPECTED" || i.verification_state === "CONFIRMED"
+      ).length,
+      content: (
+        <IncidentsPanel
+          incidents={incidents}
+          isOnline={isOnline}
+          authToken={authToken}
+          userRole={currentUser?.role_code ?? null}
+          onOpenReportModal={() => setReportModalOpen(true)}
+          onOpenAuthModal={() => setAuthModalOpen(true)}
+          onRefreshOperations={refreshOperations}
+          onToast={pushToast}
+        />
+      ),
+    },
+    {
+      id: "bridges",
+      label: "Puentes y Ventanas",
+      badge: bridgesOperations?.bridges.length ?? 0,
+      content: (
+        <BridgesPanel
+          operations={bridgesOperations}
+          incidents={incidents}
+          isOnline={isOnline}
+          authToken={authToken}
+          userRole={currentUser?.role_code ?? null}
+          onOpenAuthModal={() => setAuthModalOpen(true)}
+          onRefreshOperations={refreshOperations}
+          onToast={pushToast}
+        />
+      ),
+    },
+    {
+      id: "simulator",
+      label: "Simulador",
+      content: (
+        <SimulatorPanel
+          isOnline={isOnline}
+          authToken={authToken}
+          userRole={currentUser?.role_code ?? null}
+          onOpenAuthModal={() => setAuthModalOpen(true)}
+          onToast={pushToast}
+        />
+      ),
+    },
+  ];
 
   return (
     <div className="app-shell">
@@ -211,6 +498,20 @@ export function App({ initialFeatures }: AppProps) {
           <button type="button" onClick={() => void syncWithServer()} disabled={!isOnline}>
             Sincronizar ({syncMeta.last_seq})
           </button>
+          {currentUser ? (
+            <div className="auth-chip">
+              <span>
+                {currentUser.full_name} · <strong>{currentUser.role_code}</strong>
+              </span>
+              <button type="button" onClick={() => void handleLogout()}>
+                Salir
+              </button>
+            </div>
+          ) : (
+            <button type="button" onClick={() => setAuthModalOpen(true)}>
+              Iniciar sesión
+            </button>
+          )}
           <button type="button" onClick={() => setSettingsModalOpen(true)}>
             Configuración
           </button>
@@ -251,11 +552,28 @@ export function App({ initialFeatures }: AppProps) {
       </div>
 
       <div className="workspace">
-        <main id="main-content" tabIndex={-1}>
+        <main id="main-content" tabIndex={-1} className="main-column">
+          <RegionSelectorBar
+            units={territorialUnits}
+            selectedRegionCode={selectedRegionCode}
+            selectedProvinceUnitId={selectedProvinceUnitId}
+            selectedDistrictUnitId={selectedDistrictUnitId}
+            onSelectRegion={handleSelectRegion}
+            onSelectProvince={handleSelectProvince}
+            onSelectDistrict={setSelectedDistrictUnitId}
+            features={features}
+            loading={loadingMap}
+            pmtilesActiveUrl={activeRegionUnit?.pmtiles_uri ?? "/tiles/pe-huc.pmtiles"}
+          />
+
           <CorridorMap
             features={features}
             selectedSegmentId={selectedSegmentId}
             onSelectSegment={setSelectedSegmentId}
+            pmtilesUrl={activeRegionUnit?.pmtiles_uri}
+            focusBounds={focusBounds}
+            resolvedScheme={resolvedScheme}
+            regionLabel={activeRegionLabel}
           />
         </main>
 
@@ -295,7 +613,7 @@ export function App({ initialFeatures }: AppProps) {
             </section>
           )}
 
-          <RoutingPanel features={features} isOnline={isOnline} authToken={authToken} />
+          <OperationalTabs tabs={operationalTabs} defaultTabId="routing" />
         </aside>
       </div>
 
@@ -309,6 +627,7 @@ export function App({ initialFeatures }: AppProps) {
         onQueuedOrSent={(msg) => {
           pushToast(msg);
           void refreshLocalState();
+          void refreshOperations();
         }}
       />
 
@@ -323,9 +642,15 @@ export function App({ initialFeatures }: AppProps) {
         ephemeralRecord={ephemeralRecord}
       />
 
+      <AuthModal
+        open={authModalOpen}
+        onClose={() => setAuthModalOpen(false)}
+        onAuthenticated={handleAuthenticated}
+      />
+
       <ToastRegion
         toasts={toasts}
-        modalOpen={reportModalOpen || settingsModalOpen}
+        modalOpen={reportModalOpen || settingsModalOpen || authModalOpen}
         onDismiss={dismissToast}
       />
     </div>

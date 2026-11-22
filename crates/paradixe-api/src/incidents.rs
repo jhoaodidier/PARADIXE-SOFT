@@ -30,7 +30,7 @@ use uuid::Uuid;
 
 use crate::{
     auth::{write_audit_log, AuthUser, RoleCode},
-    error::{ApiError, ValidatedJson, ValidatedPath},
+    error::{ApiError, ValidatedJson, ValidatedPath, ValidatedQuery},
     sync::append_sync_change,
     AppState, NotificationChannel, NotificationEvent,
 };
@@ -1108,6 +1108,99 @@ pub async fn verify_incident(
         confirmed_at: new_confirmed,
         resolved_at: new_resolved,
     }))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IncidentsListQuery {
+    pub state: Option<String>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct IncidentListItemDto {
+    pub incident_id: Uuid,
+    pub segment_id: Uuid,
+    pub corridor_name: String,
+    pub trigger_source: String,
+    pub verification_state: String,
+    pub impact_passability: String,
+    pub hazard_lat: f64,
+    pub hazard_lon: f64,
+    pub hazard_radius_m: i32,
+    pub detected_at: DateTime<Utc>,
+    pub confirmed_at: Option<DateTime<Utc>>,
+    pub resolved_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct IncidentsListResponse {
+    pub incidents: Vec<IncidentListItemDto>,
+}
+
+pub async fn list_incidents(
+    State(state): State<AppState>,
+    ValidatedQuery(query): ValidatedQuery<IncidentsListQuery>,
+) -> Result<Json<IncidentsListResponse>, ApiError> {
+    let filter_state = query
+        .state
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_ascii_uppercase);
+    if let Some(ref st) = filter_state {
+        if !matches!(
+            st.as_str(),
+            "SUSPECTED" | "CONFIRMED" | "RESOLVED" | "DISMISSED"
+        ) {
+            return Err(ApiError::validation(
+                "state must be SUSPECTED, CONFIRMED, RESOLVED, or DISMISSED",
+            ));
+        }
+    }
+    let limit = query.limit.unwrap_or(100).clamp(1, 500);
+
+    let rows = sqlx::query(
+        "SELECT i.incident_id, i.segment_id, rs.corridor_name, i.trigger_source,
+                i.verification_state, i.impact_passability,
+                ST_Y(i.hazard_location_geom) AS hazard_lat,
+                ST_X(i.hazard_location_geom) AS hazard_lon,
+                i.hazard_radius_m, i.detected_at, i.confirmed_at, i.resolved_at
+         FROM incidents i
+         JOIN road_segments rs ON rs.segment_id = i.segment_id
+         WHERE ($1::text IS NULL OR i.verification_state = $1)
+         ORDER BY i.detected_at DESC, i.incident_id ASC
+         LIMIT $2",
+    )
+    .bind(filter_state)
+    .bind(limit)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(ApiError::from_db)?;
+
+    let mut incidents = Vec::with_capacity(rows.len());
+    for row in rows {
+        incidents.push(IncidentListItemDto {
+            incident_id: row.try_get("incident_id").map_err(ApiError::from_db)?,
+            segment_id: row.try_get("segment_id").map_err(ApiError::from_db)?,
+            corridor_name: row.try_get("corridor_name").map_err(ApiError::from_db)?,
+            trigger_source: row.try_get("trigger_source").map_err(ApiError::from_db)?,
+            verification_state: row
+                .try_get("verification_state")
+                .map_err(ApiError::from_db)?,
+            impact_passability: row
+                .try_get("impact_passability")
+                .map_err(ApiError::from_db)?,
+            hazard_lat: row.try_get("hazard_lat").map_err(ApiError::from_db)?,
+            hazard_lon: row.try_get("hazard_lon").map_err(ApiError::from_db)?,
+            hazard_radius_m: row.try_get("hazard_radius_m").map_err(ApiError::from_db)?,
+            detected_at: row.try_get("detected_at").map_err(ApiError::from_db)?,
+            confirmed_at: row.try_get("confirmed_at").map_err(ApiError::from_db)?,
+            resolved_at: row.try_get("resolved_at").map_err(ApiError::from_db)?,
+        });
+    }
+
+    Ok(Json(IncidentsListResponse { incidents }))
 }
 
 #[cfg(test)]

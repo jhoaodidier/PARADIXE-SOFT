@@ -127,7 +127,7 @@ pub async fn inject_simulation_event(
          SET revision = revision + 1,
              status = 'RUNNING'
          WHERE scenario_id = $1
-         RETURNING revision",
+         RETURNING revision, fixture_payload_json",
     )
     .bind(scenario_id)
     .fetch_optional(&mut *tx)
@@ -136,6 +136,31 @@ pub async fn inject_simulation_event(
     .ok_or_else(|| ApiError::not_found("Simulation scenario not found"))?;
 
     let applied_revision: i64 = rev_row.try_get("revision").map_err(ApiError::from_db)?;
+    let fixture_json: sqlx::types::Json<DrillFixturePayload> = rev_row
+        .try_get("fixture_payload_json")
+        .map_err(ApiError::from_db)?;
+    let requested_segment_id = match &body {
+        SimEventRequest::WeatherOverride { segment_id, .. }
+        | SimEventRequest::BlockageOverride { segment_id, .. } => *segment_id,
+    };
+    let in_fixture = fixture_json
+        .0
+        .segments
+        .iter()
+        .any(|s| s.segment.segment_id == requested_segment_id);
+    if !in_fixture {
+        let in_road_segments: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM road_segments WHERE segment_id = $1)")
+                .bind(requested_segment_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(ApiError::from_db)?;
+        if !in_road_segments {
+            return Err(ApiError::validation(
+                "segment_id does not exist in scenario fixture or operational road_segments",
+            ));
+        }
+    }
     let sim_event_id = Uuid::new_v4();
 
     let (segment_id, summary_msg) = match &body {
