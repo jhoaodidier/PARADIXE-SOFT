@@ -71,7 +71,9 @@ pub enum SurfaceType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum VehicleCategoryCode {
+    #[serde(rename = "AMBULANCE_4X4")]
     Ambulance4x4,
+    #[serde(rename = "PICKUP_4X4")]
     Pickup4x4,
     LightTruck,
     HeavyTrailer,
@@ -251,5 +253,23 @@ mod tests {
                 NoSafeRouteReasonCode::NetworkDisconnected,
             ]
         );
+    }
+
+    #[test]
+    fn vehicle_category_codes_match_openapi_exact_names() {
+        let expected = [
+            (VehicleCategoryCode::Ambulance4x4, "\"AMBULANCE_4X4\""),
+            (VehicleCategoryCode::Pickup4x4, "\"PICKUP_4X4\""),
+            (VehicleCategoryCode::LightTruck, "\"LIGHT_TRUCK\""),
+            (VehicleCategoryCode::HeavyTrailer, "\"HEAVY_TRAILER\""),
+            (VehicleCategoryCode::Motorcycle, "\"MOTORCYCLE\""),
+        ];
+        for (variant, json_str) in expected {
+            assert_eq!(serde_json::to_string(&variant).unwrap(), json_str);
+            assert_eq!(
+                serde_json::from_str::<VehicleCategoryCode>(json_str).unwrap(),
+                variant
+            );
+        }
     }
 }

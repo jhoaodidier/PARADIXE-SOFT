@@ -1,0 +1,48 @@
+[package]
+name = "paradixe-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "HTTP API Core (Axum + SQLx + PostGIS + RBAC + Offline Sync) for PARADIXE SOFT"
+
+[dependencies]
+argon2 = { version = "0.5", features = ["std"] }
+axum = "0.8"
+chrono.workspace = true
+dotenvy = "0.15"
+hex.workspace = true
+hmac.workspace = true
+http = "1"
+jsonwebtoken = "9"
+paradixe-consensus = { path = "../paradixe-consensus" }
+paradixe-domain.workspace = true
+paradixe-impact = { path = "../paradixe-impact" }
+paradixe-ivv = { path = "../paradixe-ivv" }
+paradixe-routing = { path = "../paradixe-routing" }
+rand = "0.8"
+rust_decimal.workspace = true
+secrecy = "0.10"
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx = { version = "0.8", default-features = false, features = [
+  "runtime-tokio",
+  "tls-rustls",
+  "postgres",
+  "uuid",
+  "chrono",
+  "rust_decimal",
+  "json",
+  "macros",
+] }
+subtle = "2.6"
+thiserror.workspace = true
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "limit"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid.workspace = true
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

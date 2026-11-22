@@ -85,6 +85,7 @@ Siguiendo los **Artículos I y II SDD (*Library-First & CLI*)**, cada motor del 
 | [`paradixe-consensus`](./crates/paradixe-consensus) | Hash seudónimo HMAC diario, clúster GPS (`SUSPECTED` únicamente) y consenso comunitario (`CON-01`). | Deduplicación `30 min`, apoyo $S \ge 1.00$, margen $\ge 0.50$ |
 | [`paradixe-routing`](./crates/paradixe-routing) | Enrutador bidireccional Dijkstra, ventanas humanitarias y Puente Logístico (`RTE-01..04`, `BRG-01..03`). | Poda vehicular, ventanas `[entry, exit]`, precedencia diagnóstica |
 | [`paradixe-impact`](./crates/paradixe-impact) | Evaluador reproducible de tiempo, $\text{CO}_2$ y merma agrícola (`SIM-01`, `SIM-02`, `IMP-01`). | `null` en `NO_SAFE_ROUTE`, deltas negativos preservados |
+| [`paradixe-api`](./crates/paradixe-api) | API Core Axum + SQLx (22 endpoints `/api/v1`, JWT/Argon2id/OTP, `sync_control`, módulo de simulacros RO). | `SEC-01..07`, `GEO-01..03`, `SYN-01..04`, `E2E-01` sobre PostGIS |
 
 ### Ejemplo Ejecutable (`paradixe-ivv` CLI)
 
@@ -128,7 +129,7 @@ Salida determinista esperada: `"ivv_score": "84.00"`, `"risk_level": "RED"`.
 
 | Ruta | Descripción |
 | :--- | :--- |
-| [`crates/`](./crates) | Cargo Workspace en Rust (`paradixe-domain`, `paradixe-ivv`, `paradixe-consensus`, `paradixe-routing`, `paradixe-impact`) |
+| [`crates/`](./crates) | Cargo Workspace en Rust (`paradixe-domain`, `paradixe-ivv`, `paradixe-consensus`, `paradixe-routing`, `paradixe-impact`, `paradixe-api`) |
 | [`apps/web/`](./apps/web) | PWA Offline-First en React + TypeScript + MapLibre GL JS + PMTiles + IndexedDB |
 | [`openapi/openapi-v1.json`](./openapi/openapi-v1.json) | Contrato OpenAPI 3.1.0 canónico (`/api/v1`, 22 rutas y esquemas discriminados) |
 | [`migrations/0001_initial_schema.sql`](./migrations/0001_initial_schema.sql) | Esquema PostgreSQL 16 + PostGIS 3.4 (27 tablas 3NF, índices `GiST ::geography`, `CHECK`s) |
@@ -171,10 +172,12 @@ npm run gen:api
 npm run typecheck && npm test && npm run build
 ```
 
-### 4. Base de Datos Espacial y Almacenamiento Local
+### 4. Base de Datos Espacial, Migraciones y Pruebas de Integración PostGIS
 ```bash
 cp .env.example .env
 docker compose up -d
+./scripts/bootstrap_dev_db.sh
+cargo test -p paradixe-api --test integration_postgis -- --ignored --test-threads=1
 ```
 
 ---
@@ -184,7 +187,8 @@ docker compose up -d
 - [x] **Etapa 0 — Arquitectura SDD y Base de Datos:** Especificación `2.0.0-prod-sdd-rust`, esquema PostgreSQL 16 + PostGIS 3.4 (27 tablas 3NF), semillas base e infraestructura Docker (PostGIS + RustFS).
 - [x] **Etapa 1A — Contrato OpenAPI 3.1 y Motores CLI en Rust:** `openapi-v1.json`, Cargo Workspace con `#![forbid(unsafe_code)]`, precisión `MidpointAwayFromZero` y suite de pruebas unitarias SDD.
 - [x] **Etapa 1B — PWA Offline-First (`apps/web`):** MapLibre GL JS + PMTiles, IndexedDB atómica (`sync_control` + `outbox_queue`), rotación diaria de ID GPS, validación accesible y CI en GitHub Actions.
-- [ ] **Etapa 2 — API Core (`paradixe-api`) e Ingestor Real (`paradixe-ingestor`):** Servidor Axum/SQLx sobre PostGIS real (34 casos de integración/contrato), ingesta OSM Geofabrik + DEM SRTM/ALOS + clima cada 3 h y generación de `PMTiles` regionales.
+- [x] **Etapa 2A — API Core (`paradixe-api`):** Servidor Axum/SQLx con los 22 endpoints `/api/v1`, roles RBAC, rol `paradixe_sim_ro` de solo lectura operativa, `sync_control` transaccional y suite de integración sobre PostgreSQL 16 + PostGIS 3.4 real.
+- [ ] **Etapa 2B — Ingestor Real (`paradixe-ingestor`):** Worker de ingesta OSM Geofabrik + DEM SRTM/ALOS + clima cada 3 h (`OPEN_METEO`/`NASA_GPM`/`SENAMHI`) y generación de `PMTiles` regionales.
 - [ ] **Etapa 3 — Mensajería Multicanal (`paradixe-messaging`):** Adaptadores de producción para WhatsApp Cloud API y SMS fallback con firmas HMAC.
 - [ ] **Etapa 4 — Piloto Operativo B2B/B2G:** Despliegue controlado en Huánuco–Carpish–Tingo María con operadores logísticos, gremios agrícolas, COER y redes de salud.
 
