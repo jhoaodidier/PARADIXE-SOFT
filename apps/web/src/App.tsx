@@ -1,27 +1,55 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
   fetchAuthMe,
   fetchBridgesOperations,
   fetchCorridorsMap,
   fetchIncidents,
+  fetchNodes,
   fetchRegions,
   fetchSyncSnapshot,
   getOrCreateDeviceId,
+  patchSegmentAttributes,
   postAuthLogout,
   postAuthRefresh,
   postSyncBatch,
+  postVerifyCorridorAttributes,
   type AuthMeResponse,
   type AuthTokenResponse,
   type BridgesOperationsResponse,
   type CorridorSegmentFeature,
   type IncidentListItem,
+  type RoadNodeItem,
   type TerritorialUnit,
 } from "./api/client.ts";
 import { AuthModal } from "./components/AuthModal.tsx";
 import { BridgesPanel } from "./components/BridgesPanel.tsx";
-import { CorridorMap } from "./components/CorridorMap.tsx";
+import {
+  CorridorMap,
+  type FlyToTarget,
+  type RouteOverlayData,
+} from "./components/CorridorMap.tsx";
 import { FieldReportModal } from "./components/FieldReportModal.tsx";
+import {
+  IconAlert,
+  IconBridge,
+  IconChevronLeft,
+  IconChevronRight,
+  IconCompass,
+  IconHospital,
+  IconLogout,
+  IconMoon,
+  IconPin,
+  IconPlus,
+  IconRefresh,
+  IconRoute,
+  IconSearch,
+  IconSettings,
+  IconSparkles,
+  IconSun,
+  IconUser,
+  IconX,
+} from "./components/Icons.tsx";
 import { IncidentsPanel } from "./components/IncidentsPanel.tsx";
 import { OperationalTabs, type TabDefinition } from "./components/OperationalTabs.tsx";
 import { RegionSelectorBar } from "./components/RegionSelectorBar.tsx";
@@ -58,6 +86,25 @@ export interface AppProps {
   initialFeatures?: CorridorSegmentFeature[];
 }
 
+const SURFACE_HUMAN: Record<
+  CorridorSegmentFeature["properties"]["surface_type"],
+  string
+> = {
+  PAVED: "Asfaltado",
+  GRAVEL: "Afirmado",
+  DIRT_TRACK: "Trocha",
+};
+
+const PASSABILITY_HUMAN: Record<
+  CorridorSegmentFeature["properties"]["passability_state"],
+  string
+> = {
+  OPEN: "Vía libre",
+  CAUTION_SUSPECTED: "Precaución",
+  PARTIAL_ONE_LANE: "Paso 1 carril",
+  BLOCKED: "Bloqueado",
+};
+
 function readStoredToken(key: string): string | null {
   try {
     return localStorage.getItem(key);
@@ -74,15 +121,23 @@ function writeStoredToken(key: string, value: string | null): void {
       localStorage.setItem(key, value);
     }
   } catch {
-    // Ignore storage errors inside restricted contexts
+    // Ignorar en contextos sin storage
   }
 }
 
 export function App({ initialFeatures }: AppProps) {
+  const searchInputId = useId();
+
   const [features, setFeatures] = useState<CorridorSegmentFeature[]>(initialFeatures ?? []);
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(
     initialFeatures?.[0]?.properties.segment_id ?? null
   );
+  const [inspectorOpen, setInspectorOpen] = useState<boolean>(
+    Boolean(initialFeatures && initialFeatures.length > 0)
+  );
+  const [drawerOpen, setDrawerOpen] = useState<boolean>(true);
+  const [activeTabId, setActiveTabId] = useState<string>("routing");
+
   const [isOnline, setIsOnline] = useState<boolean>(
     typeof navigator !== "undefined" ? navigator.onLine : true
   );
@@ -115,6 +170,7 @@ export function App({ initialFeatures }: AppProps) {
   const [currentUser, setCurrentUser] = useState<AuthMeResponse | null>(null);
 
   const [territorialUnits, setTerritorialUnits] = useState<TerritorialUnit[]>([]);
+  const [roadNodes, setRoadNodes] = useState<RoadNodeItem[]>([]);
   const [selectedRegionCode, setSelectedRegionCode] = useState<string>("PE-HUC");
   const [selectedProvinceUnitId, setSelectedProvinceUnitId] = useState<string>("");
   const [selectedDistrictUnitId, setSelectedDistrictUnitId] = useState<string>("");
@@ -124,6 +180,15 @@ export function App({ initialFeatures }: AppProps) {
   const [bridgesOperations, setBridgesOperations] = useState<BridgesOperationsResponse | null>(
     null
   );
+
+  const [globalQuery, setGlobalQuery] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [flyToTarget, setFlyToTarget] = useState<FlyToTarget | null>(null);
+  const [routeOverlay, setRouteOverlay] = useState<RouteOverlayData | null>(null);
+  const [quickOriginNodeId, setQuickOriginNodeId] = useState<string | null>(null);
+  const [quickDestNodeId, setQuickDestNodeId] = useState<string | null>(null);
+  const [certifyingSegment, setCertifyingSegment] = useState(false);
+
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -181,7 +246,7 @@ export function App({ initialFeatures }: AppProps) {
         setBridgesOperations(bridgeResp);
       }
     } catch {
-      // Silencio seguro en modo offline o respuestas simuladas
+      // Silencio seguro
     }
   }, []);
 
@@ -207,10 +272,16 @@ export function App({ initialFeatures }: AppProps) {
     if (typeof navigator !== "undefined" && !navigator.onLine) return;
     setLoadingMap(true);
     try {
-      const regResp = await fetchRegions().catch(() => null);
+      const [regResp, nodesResp] = await Promise.all([
+        fetchRegions().catch(() => null),
+        fetchNodes({ region: selectedRegionCode, limit: 80 }).catch(() => null),
+      ]);
       if (!mountedRef.current) return;
       if (regResp?.regions && regResp.regions.length > 0) {
         setTerritorialUnits(regResp.regions);
+      }
+      if (nodesResp?.nodes) {
+        setRoadNodes(nodesResp.nodes);
       }
 
       const bboxParam = selectedUnitForBbox
@@ -270,13 +341,13 @@ export function App({ initialFeatures }: AppProps) {
             }))
           );
           if (mountedRef.current) {
-            pushToast("Cola offline sincronizada correctamente con el servidor.");
+            pushToast("Cola offline sincronizada.");
           }
         }
       }
       await refreshLocalState();
     } catch {
-      // Mantiene lectura de cache local si el backend no esta accesible
+      // Mantiene cache local si el servidor no responde
     } finally {
       if (mountedRef.current) {
         setLoadingMap(false);
@@ -374,7 +445,7 @@ export function App({ initialFeatures }: AppProps) {
     setAuthToken(tokens.access_token);
     setRefreshToken(tokens.refresh_token);
     setCurrentUser(user);
-    pushToast(`Sesión iniciada: ${user.full_name} (${user.role_code}).`);
+    pushToast(`Hola, ${user.full_name}.`);
   };
 
   const handleLogout = async () => {
@@ -382,7 +453,7 @@ export function App({ initialFeatures }: AppProps) {
       await postAuthLogout(refreshToken, getOrCreateDeviceId(), authToken).catch(() => {});
     }
     clearSession();
-    pushToast("Sesión institucional cerrada.");
+    pushToast("Sesión cerrada.");
   };
 
   const handleSelectRegion = (code: string) => {
@@ -395,6 +466,11 @@ export function App({ initialFeatures }: AppProps) {
     setSelectedProvinceUnitId(unitId);
     setSelectedDistrictUnitId("");
   };
+
+  const handleSelectSegmentFromMap = useCallback((segmentId: string) => {
+    setSelectedSegmentId(segmentId);
+    setInspectorOpen(true);
+  }, []);
 
   const hasStaleData = features.some(
     (f) => f.properties.is_stale || isAssessmentStale(f.properties.calculated_at)
@@ -412,24 +488,120 @@ export function App({ initialFeatures }: AppProps) {
     ];
   }, [selectedUnitForBbox, activeRegionUnit]);
 
-  const resolvedScheme = themePreference === "system" ? systemScheme : themePreference;
+  const resolvedScheme: "light" | "dark" =
+    themePreference === "system" ? systemScheme : themePreference;
+
   const activeRegionLabel =
     selectedUnitForBbox?.name ?? activeRegionUnit?.name ?? `Región ${selectedRegionCode}`;
+
+  // Unified search results combining territorial units, hospitals/towns, and named corridors
+  const searchResults = useMemo(() => {
+    const q = globalQuery.trim().toLowerCase();
+    if (q.length < 2) return [];
+    const results: Array<
+      | { kind: "node"; id: string; title: string; subtitle: string; node: RoadNodeItem }
+      | { kind: "unit"; id: string; title: string; subtitle: string; unit: TerritorialUnit }
+      | { kind: "corridor"; id: string; title: string; subtitle: string; feature: CorridorSegmentFeature }
+    > = [];
+
+    for (const n of roadNodes) {
+      if (n.name.toLowerCase().includes(q)) {
+        results.push({
+          kind: "node",
+          id: `node-${n.node_id}`,
+          title: n.name,
+          subtitle: n.node_type === "HOSPITAL" ? "Hospital / Salud" : "Centro poblado",
+          node: n,
+        });
+      }
+      if (results.length >= 5) break;
+    }
+
+    for (const u of territorialUnits) {
+      if (u.admin_level >= 6 && u.name.toLowerCase().includes(q)) {
+        results.push({
+          kind: "unit",
+          id: `unit-${u.unit_id}`,
+          title: u.name,
+          subtitle: u.admin_level === 6 ? "Provincia" : "Distrito",
+          unit: u,
+        });
+      }
+      if (results.length >= 8) break;
+    }
+
+    const seenNames = new Set<string>();
+    for (const f of features) {
+      const nameLower = f.properties.corridor_name.toLowerCase();
+      if (nameLower.includes(q) && !seenNames.has(nameLower)) {
+        seenNames.add(nameLower);
+        results.push({
+          kind: "corridor",
+          id: `seg-${f.properties.segment_id}`,
+          title: f.properties.corridor_name,
+          subtitle: `${f.properties.length_km.toFixed(1)} km · ${SURFACE_HUMAN[f.properties.surface_type]}`,
+          feature: f,
+        });
+      }
+      if (results.length >= 10) break;
+    }
+
+    return results;
+  }, [globalQuery, roadNodes, territorialUnits, features]);
+
+  const activeIncidentCount = incidents.filter(
+    (i) => i.verification_state === "SUSPECTED" || i.verification_state === "CONFIRMED"
+  ).length;
 
   const operationalTabs: TabDefinition[] = [
     {
       id: "routing",
-      label: "Enrutamiento",
-      iconClass: "ico-route",
-      content: <RoutingPanel features={features} isOnline={isOnline} authToken={authToken} />,
+      label: "Rutas",
+      icon: <IconRoute size={14} />,
+      content: (
+        <RoutingPanel
+          features={features}
+          nodes={roadNodes}
+          isOnline={isOnline}
+          authToken={authToken}
+          externalOriginNodeId={quickOriginNodeId}
+          externalDestinationNodeId={quickDestNodeId}
+          onRouteComputed={setRouteOverlay}
+        />
+      ),
+    },
+    {
+      id: "explore",
+      label: "Explorar",
+      icon: <IconCompass size={14} />,
+      content: (
+        <RegionSelectorBar
+          units={territorialUnits}
+          selectedRegionCode={selectedRegionCode}
+          selectedProvinceUnitId={selectedProvinceUnitId}
+          selectedDistrictUnitId={selectedDistrictUnitId}
+          onSelectRegion={handleSelectRegion}
+          onSelectProvince={handleSelectProvince}
+          onSelectDistrict={setSelectedDistrictUnitId}
+          features={features}
+          selectedSegmentId={selectedSegmentId}
+          onSelectFeature={(f) => {
+            setSelectedSegmentId(f.properties.segment_id);
+            setInspectorOpen(true);
+            const first = f.geometry.coordinates[0];
+            if (first && first.length >= 2) {
+              setFlyToTarget({ lon: first[0], lat: first[1], zoom: 12.2, nonce: Date.now() });
+            }
+          }}
+          loading={loadingMap}
+        />
+      ),
     },
     {
       id: "incidents",
-      label: "Incidentes",
-      iconClass: "ico-shield",
-      badge: incidents.filter(
-        (i) => i.verification_state === "SUSPECTED" || i.verification_state === "CONFIRMED"
-      ).length,
+      label: "Alertas",
+      icon: <IconAlert size={14} />,
+      badge: activeIncidentCount,
       content: (
         <IncidentsPanel
           incidents={incidents}
@@ -445,8 +617,8 @@ export function App({ initialFeatures }: AppProps) {
     },
     {
       id: "bridges",
-      label: "Puentes y Ventanas",
-      iconClass: "ico-bridge",
+      label: "Puentes",
+      icon: <IconBridge size={14} />,
       badge: bridgesOperations?.bridges.length ?? 0,
       content: (
         <BridgesPanel
@@ -464,7 +636,7 @@ export function App({ initialFeatures }: AppProps) {
     {
       id: "simulator",
       label: "Simulador",
-      iconClass: "ico-flask",
+      icon: <IconSparkles size={14} />,
       content: (
         <SimulatorPanel
           isOnline={isOnline}
@@ -472,13 +644,14 @@ export function App({ initialFeatures }: AppProps) {
           userRole={currentUser?.role_code ?? null}
           onOpenAuthModal={() => setAuthModalOpen(true)}
           onToast={pushToast}
+          onVisualizeSimulation={setRouteOverlay}
         />
       ),
     },
   ];
 
   const selectedEffectiveRisk =
-    selectedFeature?.properties.is_stale || !selectedFeature
+    !selectedFeature || selectedFeature.properties.is_stale
       ? "UNKNOWN"
       : selectedFeature.properties.risk_level;
   const selectedIvvValue =
@@ -489,223 +662,397 @@ export function App({ initialFeatures }: AppProps) {
       : Math.min(100, Math.max(0, selectedFeature.properties.ivv_score));
 
   return (
-    <div className="app-shell">
+    <div className="app-viewport">
       <a href="#main-content" className="skip-link visually-hidden">
-        Ir al contenido principal
+        Ir al mapa principal
       </a>
 
-      <header className="app-header">
+      {/* Full-viewport interactive map */}
+      <main id="main-content" tabIndex={-1} className="map-main">
+        <CorridorMap
+          features={features}
+          selectedSegmentId={selectedSegmentId}
+          onSelectSegment={handleSelectSegmentFromMap}
+          pmtilesUrl={activeRegionUnit?.pmtiles_uri}
+          focusBounds={focusBounds}
+          flyToTarget={flyToTarget}
+          resolvedScheme={resolvedScheme}
+          regionLabel={activeRegionLabel}
+          routeOverlay={routeOverlay}
+        />
+      </main>
+
+      {/* Floating minimalist top navigation & unified search bar */}
+      <header className="floating-topbar">
         <div className="brand-lockup">
-          <img src="/icon.svg" alt="" width={36} height={36} className="brand-logo" />
-          <div className="brand-group">
-            <div className="brand-title-row">
-              <h1 className="brand-title">PARADIXE SOFT</h1>
-              <span
-                className={`conn-pill ${isOnline ? "conn-pill--online" : "conn-pill--offline"}`}
-              >
-                {isOnline ? "En línea" : "Offline"}
-              </span>
-            </div>
-            <p className="brand-subtitle">
-              Red Territorial de Resiliencia Vial y Logística Crítica — TakumiSoft
-            </p>
+          <img src="/icon.svg" alt="" width={34} height={34} className="brand-logo" />
+          <div className="brand-title-wrap">
+            <h1 className="brand-title">PARADIXE</h1>
+            <span
+              className={`conn-pill ${isOnline ? "conn-pill--online" : "conn-pill--offline"}`}
+            >
+              {isOnline ? "En vivo" : "Offline"}
+            </span>
           </div>
         </div>
 
-        <nav className="primary-nav" aria-label="Acciones operativas principales">
+        <div className="topbar-search-wrap">
+          <label htmlFor={searchInputId} className="visually-hidden">
+            Buscar distrito, hospital o vía
+          </label>
+          <div className="topbar-search-box">
+            <IconSearch size={16} className="search-icon" />
+            <input
+              id={searchInputId}
+              className="search-input"
+              type="search"
+              placeholder="Buscar vía, distrito u hospital..."
+              value={globalQuery}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setTimeout(() => setSearchFocused(false), 180)}
+              onChange={(e) => setGlobalQuery(e.target.value)}
+            />
+          </div>
+
+          {searchFocused && searchResults.length > 0 && (
+            <ul className="search-results-dropdown" role="listbox" aria-label="Resultados rápidos">
+              {searchResults.map((item) => (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    className="search-hit-btn"
+                    onMouseDown={() => {
+                      if (item.kind === "node") {
+                        setFlyToTarget({
+                          lon: item.node.lon,
+                          lat: item.node.lat,
+                          zoom: 13,
+                          nonce: Date.now(),
+                        });
+                      } else if (item.kind === "unit") {
+                        if (item.unit.admin_level === 6) {
+                          handleSelectProvince(item.unit.unit_id);
+                        } else {
+                          setSelectedDistrictUnitId(item.unit.unit_id);
+                        }
+                      } else {
+                        setSelectedSegmentId(item.feature.properties.segment_id);
+                        setInspectorOpen(true);
+                        const pt = item.feature.geometry.coordinates[0];
+                        if (pt && pt.length >= 2) {
+                          setFlyToTarget({
+                            lon: pt[0],
+                            lat: pt[1],
+                            zoom: 12.2,
+                            nonce: Date.now(),
+                          });
+                        }
+                      }
+                      setGlobalQuery("");
+                      setSearchFocused(false);
+                    }}
+                  >
+                    {item.kind === "node" && item.node.node_type === "HOSPITAL" ? (
+                      <IconHospital size={16} />
+                    ) : (
+                      <IconPin size={16} />
+                    )}
+                    <span>
+                      <strong>{item.title}</strong>
+                      <small>{item.subtitle}</small>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <nav className="primary-nav" aria-label="Acciones principales">
           <button
             type="button"
-            className="btn btn--primary icon-start ico-alert"
+            className="btn btn--primary btn--sm"
             onClick={() => setReportModalOpen(true)}
           >
-            Reportar vía
+            <IconPlus size={15} />
+            <span>Reportar vía</span>
           </button>
-          <button
-            type="button"
-            className="icon-start ico-sync"
-            onClick={() => void syncWithServer()}
-            disabled={!isOnline}
-          >
-            Sincronizar ({syncMeta.last_seq})
-          </button>
+
           {currentUser ? (
             <div className="auth-chip">
-              <span>
-                {currentUser.full_name} · <strong>{currentUser.role_code}</strong>
-              </span>
+              <span>{currentUser.full_name}</span>
               <button
                 type="button"
-                className="btn--sm icon-start ico-logout"
+                className="icon-btn icon-btn--sm"
+                aria-label="Cerrar sesión"
                 onClick={() => void handleLogout()}
               >
-                Salir
+                <IconLogout size={15} />
               </button>
             </div>
           ) : (
             <button
               type="button"
-              className="icon-start ico-user"
+              className="btn btn--sm"
               onClick={() => setAuthModalOpen(true)}
             >
-              Iniciar sesión
+              <IconUser size={15} />
+              <span>Iniciar sesión</span>
             </button>
           )}
+
           <button
             type="button"
-            className={`icon-start ${resolvedScheme === "dark" ? "ico-sun" : "ico-moon"}`}
+            className="icon-btn"
             aria-label={
               resolvedScheme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"
             }
             onClick={() => handleThemeChange(resolvedScheme === "dark" ? "light" : "dark")}
           >
-            {resolvedScheme === "dark" ? "Claro" : "Oscuro"}
+            {resolvedScheme === "dark" ? <IconSun size={17} /> : <IconMoon size={17} />}
           </button>
+
           <button
             type="button"
-            className="icon-start ico-settings"
+            className="icon-btn"
+            aria-label="Actualizar red vial"
+            disabled={!isOnline}
+            onClick={() => void syncWithServer()}
+          >
+            <IconRefresh size={17} />
+          </button>
+
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Configuración"
             onClick={() => setSettingsModalOpen(true)}
           >
-            Configuración
+            <IconSettings size={17} />
           </button>
         </nav>
       </header>
 
-      <div className="status-banners">
+      {/* Non-blocking compact status pills */}
+      <div className="floating-status-strip">
         {!isOnline && (
-          <div className="banner banner--warning" role="alert">
-            <span>
-              <strong>Modo Sin Conexión (Offline-First):</strong> visualizando red en caché
-              IndexedDB. Los reportes se encolan localmente; el cálculo de nuevas rutas requiere
-              conexión.
-            </span>
+          <div className="status-pill status-pill--amber" role="alert">
+            <span>Modo Sin Conexión (Offline-First)</span>
           </div>
         )}
-
         {hasStaleData && (
-          <div className="banner banner--danger" role="alert">
-            <span>
-              <strong>STALE_DATA:</strong> Existen tramos con índice IVV vencido (&gt; 3 h) o sin
-              observación vigente. Ningún dato vencido autoriza paso operativo.
-            </span>
+          <div className="status-pill status-pill--red" role="alert">
+            <span>STALE_DATA: Clima vencido (&gt; 3 h)</span>
           </div>
         )}
-
         {queuedReports.length > 0 && (
-          <div className="banner banner--info" role="status">
-            <span>
-              <strong>Cola outbox_queue:</strong> {queuedReports.length} reporte(s) pendiente(s) de
-              envío al servidor.
-            </span>
-            <button type="button" onClick={() => void syncWithServer()} disabled={!isOnline}>
-              Sincronizar ahora
+          <div className="status-pill status-pill--blue" role="status">
+            <span>Cola outbox_queue: {queuedReports.length} pendiente(s)</span>
+            <button
+              type="button"
+              className="chip-action-link"
+              disabled={!isOnline}
+              onClick={() => void syncWithServer()}
+            >
+              Enviar
             </button>
           </div>
         )}
       </div>
 
-      <div className="workspace">
-        <main id="main-content" tabIndex={-1} className="main-column">
-          <RegionSelectorBar
-            units={territorialUnits}
-            selectedRegionCode={selectedRegionCode}
-            selectedProvinceUnitId={selectedProvinceUnitId}
-            selectedDistrictUnitId={selectedDistrictUnitId}
-            onSelectRegion={handleSelectRegion}
-            onSelectProvince={handleSelectProvince}
-            onSelectDistrict={setSelectedDistrictUnitId}
-            features={features}
-            loading={loadingMap}
-            pmtilesActiveUrl={activeRegionUnit?.pmtiles_uri ?? "/tiles/pe-huc.pmtiles"}
+      {/* Collapsible Floating Left Spatial Drawer */}
+      <aside
+        className={`floating-drawer${drawerOpen ? "" : " is-collapsed"}`}
+        aria-label="Panel de navegación y rutas"
+      >
+        <div className="drawer-surface">
+          <OperationalTabs
+            tabs={operationalTabs}
+            activeTabId={activeTabId}
+            onChangeTab={setActiveTabId}
           />
+        </div>
 
-          <CorridorMap
-            features={features}
-            selectedSegmentId={selectedSegmentId}
-            onSelectSegment={setSelectedSegmentId}
-            pmtilesUrl={activeRegionUnit?.pmtiles_uri}
-            focusBounds={focusBounds}
-            resolvedScheme={resolvedScheme}
-            regionLabel={activeRegionLabel}
-          />
-        </main>
+        <button
+          type="button"
+          className="drawer-collapse-handle"
+          aria-expanded={drawerOpen}
+          aria-label={drawerOpen ? "Contraer panel lateral" : "Abrir panel lateral"}
+          onClick={() => setDrawerOpen((v) => !v)}
+        >
+          {drawerOpen ? <IconChevronLeft size={16} /> : <IconChevronRight size={16} />}
+        </button>
+      </aside>
 
-        <aside className="side-panel" aria-label="Panel operativo de tramo y enrutamiento">
-          {selectedFeature && (
-            <article className="card" aria-labelledby="selected-segment-title">
-              <div className="segment-inspector-header">
-                <div>
-                  <h2 id="selected-segment-title" style={{ marginBlockEnd: "0.25rem" }}>
-                    Detalle del Tramo Seleccionado
-                  </h2>
-                  <p style={{ marginBlock: 0 }}>
-                    <strong>{selectedFeature.properties.corridor_name}</strong>
-                  </p>
-                </div>
-                <RiskBadge
-                  riskLevel={selectedFeature.properties.risk_level}
-                  ivvScore={selectedFeature.properties.ivv_score}
-                  isStale={selectedFeature.properties.is_stale}
-                />
+      {/* Floating Contextual Inspector on right when segment is active */}
+      {selectedFeature && inspectorOpen && (
+        <article
+          className="floating-inspector"
+          aria-labelledby="selected-segment-title"
+        >
+          <div className="inspector-head">
+            <div>
+              <span className="section-eyebrow">Tramo seleccionado</span>
+              <h2 id="selected-segment-title" className="inspector-title">
+                {selectedFeature.properties.corridor_name}
+              </h2>
+            </div>
+            <button
+              type="button"
+              className="icon-btn icon-btn--sm"
+              aria-label="Ocultar detalle de tramo"
+              onClick={() => setInspectorOpen(false)}
+            >
+              <IconX size={16} />
+            </button>
+          </div>
+
+          <div className="inspector-meta-row">
+            <RiskBadge
+              riskLevel={selectedFeature.properties.risk_level}
+              ivvScore={selectedFeature.properties.ivv_score}
+              isStale={selectedFeature.properties.is_stale}
+            />
+            <span className="inspector-specs">
+              {selectedFeature.properties.length_km.toFixed(1)} km ·{" "}
+              {SURFACE_HUMAN[selectedFeature.properties.surface_type]} ·{" "}
+              {PASSABILITY_HUMAN[selectedFeature.properties.passability_state]}
+            </span>
+          </div>
+
+          <div className="inspector-meter-wrap">
+            <div className="inspector-meter-top">
+              <span>Riesgo climático (IVV)</span>
+              <strong className="ivv-score-readout">
+                {selectedFeature.properties.ivv_score !== null &&
+                !selectedFeature.properties.is_stale
+                  ? `${selectedFeature.properties.ivv_score.toFixed(1)} / 100`
+                  : "Sin dato vigente"}
+              </strong>
+            </div>
+            <progress
+              className={`ivv-meter ivv-meter--${selectedEffectiveRisk}`}
+              max={100}
+              value={selectedIvvValue}
+              aria-label="Índice de Vulnerabilidad Vial"
+            />
+          </div>
+
+          <div className="inspector-actions">
+            <button
+              type="button"
+              className="btn btn--sm"
+              onClick={() => {
+                setQuickOriginNodeId(selectedFeature.properties.origin_node_id);
+                setActiveTabId("routing");
+                setDrawerOpen(true);
+              }}
+            >
+              Usar origen
+            </button>
+            <button
+              type="button"
+              className="btn btn--sm"
+              onClick={() => {
+                setQuickDestNodeId(selectedFeature.properties.destination_node_id);
+                setActiveTabId("routing");
+                setDrawerOpen(true);
+              }}
+            >
+              Usar destino
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary btn--sm"
+              onClick={() => setReportModalOpen(true)}
+            >
+              Reportar
+            </button>
+          </div>
+
+          {authToken &&
+            (currentUser?.role_code === "COER_ADMIN" ||
+              currentUser?.role_code === "CIVIL_DEFENSE") &&
+            !selectedFeature.properties.is_attributes_verified && (
+              <div className="ops-actions-row" style={{ marginBlockStart: "0.5rem" }}>
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  disabled={!isOnline || certifyingSegment}
+                  onClick={() => {
+                    setCertifyingSegment(true);
+                    void patchSegmentAttributes(
+                      selectedFeature.properties.segment_id,
+                      { geometry_source: "FIELD_SURVEY" },
+                      authToken
+                    )
+                      .then(() => {
+                        pushToast(
+                          `Tramo ${selectedFeature.properties.corridor_name} certificado en campo.`
+                        );
+                        return syncWithServer();
+                      })
+                      .catch(() => {
+                        pushToast("No fue posible certificar el tramo.");
+                      })
+                      .finally(() => {
+                        if (mountedRef.current) setCertifyingSegment(false);
+                      });
+                  }}
+                >
+                  Certificar tramo
+                </button>
+                {currentUser?.role_code === "COER_ADMIN" &&
+                  !selectedFeature.properties.corridor_name.startsWith("Acceso ") && (
+                    <button
+                      type="button"
+                      className="btn btn--sm"
+                      disabled={!isOnline || certifyingSegment}
+                      onClick={() => {
+                        setCertifyingSegment(true);
+                        void postVerifyCorridorAttributes(
+                          {
+                            corridor_name: selectedFeature.properties.corridor_name,
+                            region: selectedRegionCode,
+                            geometry_source: "OFFICIAL",
+                          },
+                          authToken
+                        )
+                          .then((res) => {
+                            pushToast(
+                              `Eje certificado: ${res.segments_verified} tramos habilitados.`
+                            );
+                            return syncWithServer();
+                          })
+                          .catch(() => {
+                            pushToast("No fue posible certificar el eje.");
+                          })
+                          .finally(() => {
+                            if (mountedRef.current) setCertifyingSegment(false);
+                          });
+                      }}
+                    >
+                      Certificar eje
+                    </button>
+                  )}
               </div>
+            )}
 
-              <div className="segment-meter-box">
-                <div className="segment-meter-label">
-                  <span>Índice de Vulnerabilidad Vial (IVV)</span>
-                  <strong className="ivv-score-readout">
-                    {selectedFeature.properties.ivv_score !== null &&
-                    !selectedFeature.properties.is_stale
-                      ? `${selectedFeature.properties.ivv_score.toFixed(2)} / 100`
-                      : "Vencido / Sin dato"}
-                  </strong>
-                </div>
-                <progress
-                  className={`ivv-meter ivv-meter--${selectedEffectiveRisk}`}
-                  max={100}
-                  value={selectedIvvValue}
-                  aria-label="Índice de Vulnerabilidad Vial"
-                />
-              </div>
-
-              <div className="metrics-grid">
-                <div className="metric-box">
-                  <span className="metric-label">Longitud y superficie</span>
-                  <span className="metric-value">
-                    {selectedFeature.properties.length_km.toFixed(1)} km ·{" "}
-                    {selectedFeature.properties.surface_type}
-                  </span>
-                </div>
-                <div className="metric-box">
-                  <span className="metric-label">Transitabilidad</span>
-                  <span className="metric-value">
-                    {selectedFeature.properties.passability_state}
-                  </span>
-                </div>
-                <div className="metric-box">
-                  <span className="metric-label">Observación climática</span>
-                  <span className="metric-value">
-                    {selectedFeature.properties.observed_at
-                      ? new Date(selectedFeature.properties.observed_at).toLocaleString("es-PE")
-                      : "Sin dato"}
-                  </span>
-                </div>
-                <div className="metric-box">
-                  <span className="metric-label">Modelo IVV</span>
-                  <span className="metric-value">
-                    {selectedFeature.properties.model_version_tag ?? "No calculado"}
-                  </span>
-                </div>
-              </div>
-              <p className="hint" style={{ marginBlockStart: "0.75rem", marginBlockEnd: 0 }}>
-                {selectedFeature.properties.is_attributes_verified
-                  ? "Atributos físicos validados en campo."
-                  : "Atributos físicos no verificados en campo (no autorizan despacho)."}
-              </p>
-            </article>
-          )}
-
-          <OperationalTabs tabs={operationalTabs} defaultTabId="routing" />
-        </aside>
-      </div>
+          <details className="disclosure-inline" style={{ marginBlockStart: "0.55rem" }}>
+            <summary>Ficha técnica</summary>
+            <p className="hint" style={{ marginBlock: "0.35rem 0" }}>
+              Clima:{" "}
+              {selectedFeature.properties.observed_at
+                ? new Date(selectedFeature.properties.observed_at).toLocaleString("es-PE")
+                : "Sin observación"}
+              {" · "}
+              {selectedFeature.properties.is_attributes_verified
+                ? "Verificado en campo"
+                : "Sin verificación física"}
+            </p>
+          </details>
+        </article>
+      )}
 
       <FieldReportModal
         open={reportModalOpen}

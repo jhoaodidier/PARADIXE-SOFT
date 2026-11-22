@@ -5,11 +5,11 @@ const STORAGE_KEY = "color-scheme";
 export function readStoredThemePreference(): ThemePreference {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw === "light" || raw === "dark") return raw;
+    if (raw === "light" || raw === "dark" || raw === "system") return raw;
   } catch {
     // Ignorar error si storage esta bloqueado
   }
-  return "system";
+  return "light";
 }
 
 export function getSystemResolvedScheme(): "light" | "dark" {
@@ -26,11 +26,7 @@ export function applyThemePreference(pref: ThemePreference): void {
     meta.content = metaContent;
   }
   try {
-    if (pref === "system") {
-      localStorage.removeItem(STORAGE_KEY);
-    } else {
-      localStorage.setItem(STORAGE_KEY, pref);
-    }
+    localStorage.setItem(STORAGE_KEY, pref);
   } catch {
     // Seguir aplicando visualmente aunque persistencia falle
   }
@@ -51,7 +47,6 @@ export function subscribeThemeChanges(
 
   const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
   const onMediaChange = () => {
-    // Nunca borrar la preferencia guardada cuando cambia el sistema operativo
     onUpdate(readStoredThemePreference(), getSystemResolvedScheme());
   };
   mq?.addEventListener?.("change", onMediaChange);

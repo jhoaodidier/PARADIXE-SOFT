@@ -2,6 +2,7 @@ import { useEffect, useId, useRef } from "react";
 import type { EphemeralTelemetryRecord, SyncMetaRecord } from "../offline/db.ts";
 import type { ThemePreference } from "../utils/theme.ts";
 import { attachDialogLightDismissFallback, closeTopLayer } from "../utils/topLayer.ts";
+import { IconMoon, IconSun, IconX } from "./Icons.tsx";
 
 export interface SettingsModalProps {
   open: boolean;
@@ -71,74 +72,83 @@ export function SettingsModal({
     >
       <div className="modal-content">
         <div className="modal-header">
-          <h2 id={titleId}>Configuración y Sincronización Offline</h2>
+          <div>
+            <h2 id={titleId}>Ajustes</h2>
+            <p className="panel-subtitle">Apariencia y sincronización</p>
+          </div>
           <button
             type="button"
+            className="icon-btn"
             autoFocus
             aria-label="Cerrar diálogo de configuración"
             onClick={() => dialogRef.current && void closeTopLayer(dialogRef.current)}
           >
-            Cerrar
+            <IconX size={18} />
           </button>
         </div>
 
-        <fieldset>
-          <legend>Esquema de color de la interfaz</legend>
-          <div className="radio-group">
-            <label className="radio-option">
+        <div className="group-block" style={{ marginBlockEnd: "1.25rem" }}>
+          <span className="section-eyebrow">Tema visual</span>
+          <div className="segmented-pills" role="radiogroup" aria-label="Esquema de color de la interfaz">
+            <label className="segmented-pill">
               <input
                 type="radio"
-                name="theme_pref"
-                value="system"
-                checked={themePreference === "system"}
-                onChange={() => onChangeTheme("system")}
-              />
-              <span>Sistema (actualmente {systemLabel})</span>
-            </label>
-            <label className="radio-option">
-              <input
-                type="radio"
+                className="visually-hidden"
                 name="theme_pref"
                 value="light"
                 checked={themePreference === "light"}
                 onChange={() => onChangeTheme("light")}
               />
+              <IconSun size={15} />
               <span>Claro</span>
             </label>
-            <label className="radio-option">
+            <label className="segmented-pill">
               <input
                 type="radio"
+                className="visually-hidden"
                 name="theme_pref"
                 value="dark"
                 checked={themePreference === "dark"}
                 onChange={() => onChangeTheme("dark")}
               />
+              <IconMoon size={15} />
               <span>Oscuro</span>
             </label>
+            <label className="segmented-pill">
+              <input
+                type="radio"
+                className="visually-hidden"
+                name="theme_pref"
+                value="system"
+                checked={themePreference === "system"}
+                onChange={() => onChangeTheme("system")}
+              />
+              <span>Sistema ({systemLabel})</span>
+            </label>
           </div>
-        </fieldset>
+        </div>
 
-        <section className="card">
-          <h3>Estado de Caché y Privacidad GPS</h3>
-          <dl>
-            <dt>Último cursor sincronizado (sync_control)</dt>
-            <dd>{syncMeta.last_seq}</dd>
-            <dt>Última conectividad registrada</dt>
+        <details className="disclosure-card">
+          <summary>Estado offline y privacidad GPS</summary>
+          <dl className="settings-dl">
+            <dt>Cursor de sincronización</dt>
+            <dd>#{syncMeta.last_seq}</dd>
+            <dt>Última actualización</dt>
             <dd>
               {syncMeta.last_synced_at
                 ? new Date(syncMeta.last_synced_at).toLocaleString("es-PE")
                 : "Sin sincronizar"}
             </dd>
-            <dt>Reportes pendientes en outbox_queue</dt>
+            <dt>Reportes en cola offline</dt>
             <dd>{queuedCount}</dd>
-            <dt>Rotación seudónima GPS diaria (UTC)</dt>
+            <dt>Rotación anónima diaria GPS</dt>
             <dd>
               {ephemeralRecord
-                ? `${ephemeralRecord.ephemeral_id_date_utc} (ID efímero rotativo activo)`
+                ? `${ephemeralRecord.ephemeral_id_date_utc} (Activo)`
                 : "Inicializando"}
             </dd>
           </dl>
-        </section>
+        </details>
       </div>
     </dialog>
   );

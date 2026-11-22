@@ -5,6 +5,7 @@ import {
   type IncidentListItem,
   type RoleCode,
 } from "../api/client.ts";
+import { IconAlert, IconPlus } from "./Icons.tsx";
 
 export interface IncidentsPanelProps {
   incidents: IncidentListItem[];
@@ -26,9 +27,16 @@ const STATE_LABELS: Record<IncidentListItem["verification_state"], string> = {
 
 const PASSABILITY_LABELS: Record<IncidentListItem["impact_passability"], string> = {
   CAUTION_SUSPECTED: "Precaución",
-  PARTIAL_ONE_LANE: "Paso 1 carril",
+  PARTIAL_ONE_LANE: "1 carril",
   BLOCKED: "Bloqueado",
 };
+
+const FILTER_OPTIONS = [
+  { id: "ALL", label: "Todos" },
+  { id: "SUSPECTED", label: "Sospecha" },
+  { id: "CONFIRMED", label: "Confirmados" },
+  { id: "RESOLVED", label: "Resueltos" },
+] as const;
 
 export function IncidentsPanel({
   incidents,
@@ -41,7 +49,6 @@ export function IncidentsPanel({
   onToast,
 }: IncidentsPanelProps) {
   const headingId = useId();
-  const filterId = useId();
   const [stateFilter, setStateFilter] = useState<string>("ALL");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -73,12 +80,12 @@ export function IncidentsPanel({
         authToken
       );
       await onRefreshOperations();
-      onToast(`Incidente actualizado a ${verificationState} (${impactPassability}).`);
+      onToast(`Incidente marcado como ${STATE_LABELS[verificationState]}.`);
     } catch (err) {
       if (err instanceof ApiClientError) {
         setErrorMsg(`${err.errorCode}: ${err.message}`);
       } else {
-        setErrorMsg("No fue posible actualizar la verificación del incidente.");
+        setErrorMsg("No fue posible actualizar el incidente.");
       }
     } finally {
       setBusyId(null);
@@ -86,61 +93,55 @@ export function IncidentsPanel({
   }
 
   return (
-    <section className="card" aria-labelledby={headingId}>
-      <div className="panel-header-row">
-        <h2 id={headingId} style={{ marginBlockEnd: 0 }}>
-          Incidentes y Consenso
-        </h2>
-        <button type="button" className="btn btn--primary" onClick={onOpenReportModal}>
-          Nuevo reporte
+    <div className="panel-stack" aria-labelledby={headingId}>
+      <div className="panel-heading-row">
+        <div>
+          <h2 id={headingId} className="panel-title">
+            Alertas en vía
+          </h2>
+          <p className="panel-subtitle">Derrumbes y cortes reportados</p>
+        </div>
+        <button type="button" className="btn btn--primary btn--sm" onClick={onOpenReportModal}>
+          <IconPlus size={15} />
+          <span>Reportar</span>
         </button>
       </div>
-      <p className="hint">
-        Los clústeres de telemetría solo generan estado <code>SUSPECTED</code>; la confirmación
-        operativa exige consenso comunitario o validación COER/Defensa Civil.
-      </p>
 
-      {!canVerify && (
-        <div className="banner banner--info" style={{ marginBlockEnd: "0.75rem" }}>
-          <span>
-            Solo <strong>COER_ADMIN</strong> o <strong>CIVIL_DEFENSE</strong> pueden confirmar o
-            resolver incidentes.
-          </span>
-          {!authToken && (
-            <button type="button" onClick={onOpenAuthModal}>
-              Iniciar sesión
-            </button>
-          )}
+      <div className="filter-chips-row" role="group" aria-label="Filtrar estado de incidentes">
+        {FILTER_OPTIONS.map((opt) => (
+          <button
+            key={opt.id}
+            type="button"
+            className={`filter-chip${stateFilter === opt.id ? " is-active" : ""}`}
+            aria-pressed={stateFilter === opt.id}
+            onClick={() => setStateFilter(opt.id)}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      {!canVerify && !authToken && (
+        <div className="auth-nudge-card">
+          <span>Personal autorizado valida incidentes</span>
+          <button type="button" className="btn btn--sm" onClick={onOpenAuthModal}>
+            Entrar
+          </button>
         </div>
       )}
 
       {errorMsg && (
-        <div className="banner banner--danger" role="alert" style={{ marginBlockEnd: "0.75rem" }}>
+        <div className="banner banner--danger" role="alert">
           <span>{errorMsg}</span>
         </div>
       )}
 
-      <div className="field">
-        <label htmlFor={filterId}>Filtrar estado</label>
-        <select
-          id={filterId}
-          className="brand-select"
-          value={stateFilter}
-          onChange={(e) => setStateFilter(e.target.value)}
-        >
-          <option value="ALL">Todos ({incidents.length})</option>
-          <option value="SUSPECTED">Sospecha (SUSPECTED)</option>
-          <option value="CONFIRMED">Confirmados (CONFIRMED)</option>
-          <option value="RESOLVED">Resueltos (RESOLVED)</option>
-          <option value="DISMISSED">Descartados (DISMISSED)</option>
-        </select>
-      </div>
-
       {visibleIncidents.length === 0 ? (
-        <p className="hint">
-          No hay incidentes registrados para el filtro seleccionado. Use &quot;Reportar vía&quot; o
-          &quot;Nuevo reporte&quot; para registrar un evento geotécnico.
-        </p>
+        <div className="empty-state-card">
+          <IconAlert size={22} />
+          <strong>Sin incidencias activas</strong>
+          <span>Las rutas monitoreadas no registran cortes en este filtro.</span>
+        </div>
       ) : (
         <ul className="ops-card-list">
           {visibleIncidents.map((inc) => {
@@ -164,10 +165,14 @@ export function IncidentsPanel({
                     {PASSABILITY_LABELS[inc.impact_passability]}
                   </span>
                 </div>
-                <p className="hint" style={{ marginBlock: "0.35rem 0.5rem" }}>
-                  Origen: {inc.trigger_source} · Radio {inc.hazard_radius_m} m · (
-                  {inc.hazard_lat.toFixed(4)}, {inc.hazard_lon.toFixed(4)}) ·{" "}
-                  {new Date(inc.detected_at).toLocaleString("es-PE")}
+                <p className="panel-subtitle" style={{ marginBlock: "0.25rem 0.5rem" }}>
+                  Radio {inc.hazard_radius_m} m ·{" "}
+                  {new Date(inc.detected_at).toLocaleString("es-PE", {
+                    day: "2-digit",
+                    month: "short",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
                 </p>
 
                 {canVerify && isActive && (
@@ -178,7 +183,7 @@ export function IncidentsPanel({
                       disabled={!isOnline || busyId === inc.incident_id}
                       onClick={() => void handleVerify(inc.incident_id, "CONFIRMED", "BLOCKED")}
                     >
-                      Confirmar bloqueo
+                      Bloqueo
                     </button>
                     <button
                       type="button"
@@ -217,6 +222,6 @@ export function IncidentsPanel({
           })}
         </ul>
       )}
-    </section>
+    </div>
   );
 }

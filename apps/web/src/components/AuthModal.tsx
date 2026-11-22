@@ -9,6 +9,7 @@ import {
   type AuthTokenResponse,
 } from "../api/client.ts";
 import { attachDialogLightDismissFallback, closeTopLayer } from "../utils/topLayer.ts";
+import { IconX } from "./Icons.tsx";
 
 export interface AuthModalProps {
   open: boolean;
@@ -152,7 +153,7 @@ export function AuthModal({ open, onClose, onAuthenticated }: AuthModalProps) {
       if (err instanceof ApiClientError) {
         setErrorMsg(`${err.errorCode}: ${err.message}`);
       } else {
-        setErrorMsg("No fue posible autenticar con el servidor. Verifique la conexión.");
+        setErrorMsg("No fue posible iniciar sesión.");
       }
     } finally {
       setSubmitting(false);
@@ -173,7 +174,7 @@ export function AuthModal({ open, onClose, onAuthenticated }: AuthModalProps) {
       if (err instanceof ApiClientError) {
         setErrorMsg(`${err.errorCode}: ${err.message}`);
       } else {
-        setErrorMsg("No fue posible solicitar el código OTP SMS.");
+        setErrorMsg("No fue posible solicitar el código SMS.");
       }
     } finally {
       setSubmitting(false);
@@ -214,20 +215,24 @@ export function AuthModal({ open, onClose, onAuthenticated }: AuthModalProps) {
     >
       <div className="modal-content">
         <div className="modal-header">
-          <h2 id={titleId}>Acceso de Operador Territorial</h2>
+          <div>
+            <h2 id={titleId}>Acceso de Operador Territorial</h2>
+            <p className="panel-subtitle">COER, Defensa Civil y Salud</p>
+          </div>
           <button
             type="button"
+            className="icon-btn"
             aria-label="Cerrar diálogo de acceso"
             onClick={() => dialogRef.current && void closeTopLayer(dialogRef.current)}
           >
-            Cerrar
+            <IconX size={18} />
           </button>
         </div>
 
-        <div className="auth-mode-switch" role="group" aria-label="Método de autenticación">
+        <div className="segmented-pills" role="group" aria-label="Método de autenticación" style={{ marginBlockEnd: "1rem" }}>
           <button
             type="button"
-            className={mode === "password" ? "btn btn--primary" : undefined}
+            className={`segmented-pill${mode === "password" ? " is-active" : ""}`}
             aria-pressed={mode === "password"}
             onClick={() => {
               setErrorMsg(null);
@@ -238,7 +243,7 @@ export function AuthModal({ open, onClose, onAuthenticated }: AuthModalProps) {
           </button>
           <button
             type="button"
-            className={mode === "otp" ? "btn btn--primary" : undefined}
+            className={`segmented-pill${mode === "otp" ? " is-active" : ""}`}
             aria-pressed={mode === "otp"}
             onClick={() => {
               setErrorMsg(null);
@@ -274,10 +279,7 @@ export function AuthModal({ open, onClose, onAuthenticated }: AuthModalProps) {
                 data-error={phoneErrorId}
               />
               <span id={phoneErrorId} className="error-msg">
-                <span role="img" aria-label="Error">
-                  ⚠
-                </span>{" "}
-                Ingrese un teléfono en formato E.164 (ej. +51962000100).
+                Ingrese un teléfono válido (ej. +51962000100).
               </span>
             </div>
 
@@ -297,6 +299,7 @@ export function AuthModal({ open, onClose, onAuthenticated }: AuthModalProps) {
                 />
                 <button
                   type="button"
+                  className="btn"
                   aria-pressed={showPassword}
                   onClick={() => setShowPassword((v) => !v)}
                 >
@@ -304,25 +307,22 @@ export function AuthModal({ open, onClose, onAuthenticated }: AuthModalProps) {
                 </button>
               </div>
               <span id={pwErrorId} className="error-msg">
-                <span role="img" aria-label="Error">
-                  ⚠
-                </span>{" "}
                 Ingrese su contraseña operativa.
               </span>
             </div>
 
-            <details className="hint" style={{ marginBlockEnd: "1rem" }}>
-              <summary>Cuentas de prueba locales (dev seed)</summary>
-              <p style={{ marginBlock: "0.5rem 0" }}>
-                Tras ejecutar <code>seed_dev_users</code>: <code>+51962000100</code> (COER Admin),{" "}
-                <code>+51962000200</code> (Defensa Civil), <code>+51962000300</code> (Salud /
-                SAMU).
+            <details className="disclosure-inline" style={{ marginBlockEnd: "1rem" }}>
+              <summary>Cuentas de prueba locales</summary>
+              <p className="hint" style={{ marginBlock: "0.4rem 0" }}>
+                <code>+51962000100</code> (COER), <code>+51962000200</code> (Defensa Civil),{" "}
+                <code>+51962000300</code> (Salud).
               </p>
             </details>
 
             <div className="modal-actions">
               <button
                 type="button"
+                className="btn"
                 onClick={() => dialogRef.current && void closeTopLayer(dialogRef.current)}
               >
                 Cancelar
@@ -349,7 +349,7 @@ export function AuthModal({ open, onClose, onAuthenticated }: AuthModalProps) {
                   onChange={(e) => setPhoneE164(e.target.value)}
                 />
               </div>
-              <button type="submit" disabled={submitting}>
+              <button type="submit" className="btn" disabled={submitting}>
                 {challengeId ? "Reenviar código SMS" : "Solicitar código SMS"}
               </button>
             </form>
@@ -380,22 +380,20 @@ export function AuthModal({ open, onClose, onAuthenticated }: AuthModalProps) {
                     onChange={(e) => setOtpCode(e.target.value)}
                   />
                   <span id={otpErrorId} className="error-msg">
-                    <span role="img" aria-label="Error">
-                      ⚠
-                    </span>{" "}
-                    El código debe tener exactamente 6 dígitos numéricos.
+                    El código debe tener 6 dígitos.
                   </span>
                 </div>
 
                 <div className="modal-actions">
                   <button
                     type="button"
+                    className="btn"
                     onClick={() => dialogRef.current && void closeTopLayer(dialogRef.current)}
                   >
                     Cancelar
                   </button>
                   <button type="submit" className="btn btn--primary" disabled={submitting}>
-                    {submitting ? "Verificando código..." : "Verificar código"}
+                    {submitting ? "Verificando..." : "Verificar código"}
                   </button>
                 </div>
               </form>

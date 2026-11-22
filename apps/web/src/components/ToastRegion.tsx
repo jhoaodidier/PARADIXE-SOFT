@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { IconX } from "./Icons.tsx";
 
 export interface ToastMessage {
   id: string;
@@ -42,13 +43,15 @@ function ToastPopover({
       <span>{toast.text}</span>
       <button
         type="button"
+        className="icon-btn"
+        aria-label="Cerrar notificación"
         onClick={() => onDismiss(toast.id)}
         {...({
           popoverTarget: `toast-${toast.id}`,
           popoverTargetAction: "hide",
         } as Record<string, string>)}
       >
-        Cerrar
+        <IconX size={15} />
       </button>
     </div>
   );

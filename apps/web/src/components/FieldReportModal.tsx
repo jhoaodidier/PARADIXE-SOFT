@@ -6,6 +6,7 @@ import {
 } from "../api/client.ts";
 import { enqueueFieldReport } from "../offline/db.ts";
 import { attachDialogLightDismissFallback, closeTopLayer } from "../utils/topLayer.ts";
+import { IconCrosshair, IconX } from "./Icons.tsx";
 
 export interface FieldReportModalProps {
   open: boolean;
@@ -28,9 +29,7 @@ export function FieldReportModal({
 }: FieldReportModalProps) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const titleId = useId();
-  const latHintId = useId();
   const latErrorId = useId();
-  const lonHintId = useId();
   const lonErrorId = useId();
 
   const [segmentId, setSegmentId] = useState("");
@@ -39,7 +38,8 @@ export function FieldReportModal({
   const [longitude, setLongitude] = useState("-76.0910");
   const [submitting, setSubmitting] = useState(false);
 
-  const effectiveSegmentId = segmentId || defaultSegmentId || features[0]?.properties.segment_id || "";
+  const effectiveSegmentId =
+    segmentId || defaultSegmentId || features[0]?.properties.segment_id || "";
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -112,19 +112,15 @@ export function FieldReportModal({
           },
           authToken
         );
-        onQueuedOrSent("Reporte de campo enviado al servidor para validación comunitaria.");
+        onQueuedOrSent("Reporte enviado al sistema de consenso vial.");
       } else {
-        onQueuedOrSent(
-          "Sin conexión o sesión activa: reporte guardado en outbox_queue offline para envío automático."
-        );
+        onQueuedOrSent("Reporte guardado localmente para envío automático al recuperar red.");
       }
       if (dialogRef.current) {
         await closeTopLayer(dialogRef.current);
       }
     } catch {
-      onQueuedOrSent(
-        "El servidor no respondió; el reporte permanece protegido en outbox_queue offline."
-      );
+      onQueuedOrSent("El reporte quedó protegido en cola offline para reintento.");
       if (dialogRef.current) {
         await closeTopLayer(dialogRef.current);
       }
@@ -142,19 +138,23 @@ export function FieldReportModal({
     >
       <div className="modal-content">
         <div className="modal-header">
-          <h2 id={titleId}>Reportar estado de vía</h2>
+          <div>
+            <h2 id={titleId}>Reportar estado de vía</h2>
+            <p className="panel-subtitle">Ayuda a otros conductores en tiempo real</p>
+          </div>
           <button
             type="button"
+            className="icon-btn"
             aria-label="Cerrar diálogo de reporte"
             onClick={() => dialogRef.current && void closeTopLayer(dialogRef.current)}
           >
-            Cerrar
+            <IconX size={18} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} aria-labelledby={titleId}>
+        <form onSubmit={handleSubmit} className="clean-form" aria-labelledby={titleId}>
           <div className="field">
-            <label htmlFor="report-segment">Tramo vial observado</label>
+            <label htmlFor="report-segment">Tramo observado</label>
             <select
               id="report-segment"
               name="segment_id"
@@ -166,115 +166,108 @@ export function FieldReportModal({
               data-error="report-segment-error"
             >
               {features.length === 0 ? (
-                <option value="">Sin tramos en caché</option>
+                <option value="">Sin tramos disponibles</option>
               ) : (
                 features.map((f) => (
                   <option key={f.properties.segment_id} value={f.properties.segment_id}>
-                    {f.properties.corridor_name} ({f.properties.length_km} km)
+                    {f.properties.corridor_name} ({f.properties.length_km.toFixed(1)} km)
                   </option>
                 ))
               )}
             </select>
             <span id="report-segment-error" className="error-msg">
-              <span role="img" aria-label="Error">
-                ⚠
-              </span>{" "}
-              Seleccione un tramo vial.
+              Seleccione un tramo.
             </span>
           </div>
 
-          <fieldset>
-            <legend>Transitabilidad observada</legend>
-            <div className="choice-grid">
+          <div className="group-block">
+            <span className="section-eyebrow">¿Cómo está el paso?</span>
+            <div className="choice-grid" role="radiogroup" aria-label="Transitabilidad observada">
               <label className="choice-card">
                 <input
                   type="radio"
+                  className="visually-hidden"
                   name="proposed_passability"
                   value="BLOCKED"
                   checked={passability === "BLOCKED"}
                   onChange={() => setPassability("BLOCKED")}
                 />
-                <span>Vía bloqueada (derrumbe / huaico)</span>
+                <span className="status-dot status-dot--red" aria-hidden="true" />
+                <span>Cerrada / Derrumbe</span>
               </label>
               <label className="choice-card">
                 <input
                   type="radio"
+                  className="visually-hidden"
                   name="proposed_passability"
                   value="PARTIAL_ONE_LANE"
                   checked={passability === "PARTIAL_ONE_LANE"}
                   onChange={() => setPassability("PARTIAL_ONE_LANE")}
                 />
-                <span>Paso restringido a un carril</span>
+                <span className="status-dot status-dot--amber" aria-hidden="true" />
+                <span>Paso en un carril</span>
               </label>
               <label className="choice-card">
                 <input
                   type="radio"
+                  className="visually-hidden"
                   name="proposed_passability"
                   value="OPEN"
                   checked={passability === "OPEN"}
                   onChange={() => setPassability("OPEN")}
                 />
-                <span>Vía despejada</span>
+                <span className="status-dot status-dot--green" aria-hidden="true" />
+                <span>Vía libre</span>
               </label>
             </div>
-          </fieldset>
-
-          <div className="field">
-            <label htmlFor="report-lat">Latitud WGS84</label>
-            <span id={latHintId} className="hint">
-              Coordenada en grados decimales (entre -90 y 90).
-            </span>
-            <input
-              id="report-lat"
-              name="latitude"
-              type="text"
-              inputMode="decimal"
-              required
-              pattern="^-?([1-8]?\d(\.\d+)?|90(\.0+)?)$"
-              value={latitude}
-              onChange={(e) => setLatitude(e.target.value)}
-              aria-describedby={latHintId}
-              data-error={latErrorId}
-            />
-            <span id={latErrorId} className="error-msg">
-              <span role="img" aria-label="Error">
-                ⚠
-              </span>{" "}
-              Ingrese una latitud válida (ej. -9.7120).
-            </span>
           </div>
 
-          <div className="field">
-            <label htmlFor="report-lon">Longitud WGS84</label>
-            <span id={lonHintId} className="hint">
-              Coordenada en grados decimales (entre -180 y 180).
-            </span>
-            <input
-              id="report-lon"
-              name="longitude"
-              type="text"
-              inputMode="decimal"
-              required
-              pattern="^-?(1[0-7]\d(\.\d+)?|[1-9]?\d(\.\d+)?|180(\.0+)?)$"
-              value={longitude}
-              onChange={(e) => setLongitude(e.target.value)}
-              aria-describedby={lonHintId}
-              data-error={lonErrorId}
-            />
-            <span id={lonErrorId} className="error-msg">
-              <span role="img" aria-label="Error">
-                ⚠
-              </span>{" "}
-              Ingrese una longitud válida (ej. -76.0910).
-            </span>
+          <div className="two-col-inline">
+            <div className="field field--tight">
+              <label htmlFor="report-lat">Latitud</label>
+              <input
+                id="report-lat"
+                name="latitude"
+                type="text"
+                inputMode="decimal"
+                required
+                pattern="^-?([1-8]?\d(\.\d+)?|90(\.0+)?)$"
+                value={latitude}
+                onChange={(e) => setLatitude(e.target.value)}
+                data-error={latErrorId}
+              />
+              <span id={latErrorId} className="error-msg">
+                Latitud inválida.
+              </span>
+            </div>
+
+            <div className="field field--tight">
+              <label htmlFor="report-lon">Longitud</label>
+              <input
+                id="report-lon"
+                name="longitude"
+                type="text"
+                inputMode="decimal"
+                required
+                pattern="^-?(1[0-7]\d(\.\d+)?|[1-9]?\d(\.\d+)?|180(\.0+)?)$"
+                value={longitude}
+                onChange={(e) => setLongitude(e.target.value)}
+                data-error={lonErrorId}
+              />
+              <span id={lonErrorId} className="error-msg">
+                Longitud inválida.
+              </span>
+            </div>
           </div>
 
           <div className="modal-actions">
-            <button type="button" onClick={handleLocate}>
-              Usar GPS actual
+            <button type="button" className="btn" onClick={handleLocate}>
+              <IconCrosshair size={16} />
+              <span>Usar GPS actual</span>
             </button>
             <button
               type="button"
+              className="btn"
               onClick={() => dialogRef.current && void closeTopLayer(dialogRef.current)}
             >
               Cancelar

@@ -1,66 +1,92 @@
-import { useId, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import {
   ApiClientError,
   postRoutingCalculate,
   type CargoType,
   type CorridorSegmentFeature,
   type NoSafeRouteReasonCode,
+  type RoadNodeItem,
   type RoutingCalculateResponse,
   type VehicleCategoryCode,
 } from "../api/client.ts";
+import type { RouteOverlayData } from "./CorridorMap.tsx";
+import {
+  IconAmbulance,
+  IconBike,
+  IconCar,
+  IconClock,
+  IconRoute,
+  IconSwap,
+  IconTruck,
+} from "./Icons.tsx";
 
 export interface RoutingPanelProps {
   features: CorridorSegmentFeature[];
+  nodes?: RoadNodeItem[];
   isOnline: boolean;
   authToken: string | null;
+  externalOriginNodeId?: string | null;
+  externalDestinationNodeId?: string | null;
+  onRouteComputed?: (overlay: RouteOverlayData | null) => void;
 }
 
-const VEHICLE_OPTIONS: Array<{ code: VehicleCategoryCode; label: string }> = [
-  { code: "AMBULANCE_4X4", label: "Ambulancia 4x4 (SAMU / Posta)" },
-  { code: "PICKUP_4X4", label: "Camioneta 4x4" },
-  { code: "LIGHT_TRUCK", label: "Camión agrícola ligero" },
-  { code: "HEAVY_TRAILER", label: "Tráiler de carga pesada" },
-  { code: "MOTORCYCLE", label: "Motocicleta de última milla" },
+const VEHICLE_OPTIONS: Array<{
+  code: VehicleCategoryCode;
+  label: string;
+  icon: ReactNode;
+}> = [
+  { code: "AMBULANCE_4X4", label: "Ambulancia", icon: <IconAmbulance size={16} /> },
+  { code: "PICKUP_4X4", label: "Camioneta 4x4", icon: <IconCar size={16} /> },
+  { code: "LIGHT_TRUCK", label: "Camión", icon: <IconTruck size={16} /> },
+  { code: "HEAVY_TRAILER", label: "Tráiler", icon: <IconTruck size={16} /> },
+  { code: "MOTORCYCLE", label: "Moto", icon: <IconBike size={16} /> },
 ];
 
 const CARGO_OPTIONS: Array<{ code: CargoType; label: string }> = [
-  { code: "MEDICAL_PATIENT", label: "Paciente médico crítico" },
-  { code: "MEDICAL_SUPPLIES", label: "Insumos médicos" },
-  { code: "PERISHABLE_AGRI", label: "Carga agrícola perecible" },
+  { code: "MEDICAL_PATIENT", label: "Paciente" },
+  { code: "MEDICAL_SUPPLIES", label: "Insumos" },
+  { code: "PERISHABLE_AGRI", label: "Agrícola" },
 ];
 
 const REASON_DESCRIPTIONS: Record<NoSafeRouteReasonCode, string> = {
   UNVERIFIED_PHYSICAL_ATTRIBUTES:
-    "Existen tramos sin validación física de ancho, pendiente o capacidad portante.",
+    "Tramos de la red sin verificación física de ancho o pendiente.",
   STALE_IVV:
-    "El Índice de Vulnerabilidad Vial (IVV) vigente caducó o falta observación climática.",
+    "El pronóstico climático caducó y no autoriza cálculo seguro.",
   VEHICLE_RESTRICTION:
-    "La categoría vehicular excede pendiente, ancho, peso o restricción de trocha.",
+    "El vehículo seleccionado excede la pendiente, ancho o peso de la vía.",
   TRANSFER_REVALIDATION_REQUIRED:
-    "El corredor de transbordo requiere revalidación tras evento geotécnico reciente.",
+    "El paso de transbordo requiere inspección técnica reciente.",
   TRANSFER_INSPECTION_EXPIRED:
-    "La inspección física del corredor de transbordo expiró.",
+    "La inspección del paso de transbordo caducó.",
   HAZARD_INTERSECTS_TRANSFER_PATH:
-    "El radio geotécnico de peligro intersecta el corredor de transbordo.",
+    "Una zona de derrumbe intercepta el paso de transbordo.",
   TRANSFER_IVV_EXCEEDED:
-    "El IVV del sector supera el umbral seguro del corredor de transbordo.",
+    "El riesgo climático supera el máximo seguro del sector.",
   TRANSFER_CARGO_CAPACITY_EXCEEDED:
-    "El peso de carga supera la capacidad máxima verificada del puente logístico.",
+    "La carga excede el peso máximo del puente logístico.",
   TRANSFER_CARGO_NOT_ALLOWED:
-    "El corredor de transbordo no está habilitado para este tipo de carga o paciente.",
+    "El puente logístico no está habilitado para esta carga.",
   NO_VERIFIED_TRANSFER_CORRIDOR:
-    "No existe corredor de transbordo inspeccionado disponible entre ambos lados.",
+    "Sin corredor de transbordo habilitado entre ambos tramos.",
   NETWORK_DISCONNECTED:
-    "No existe conectividad verificada entre el nodo de origen y destino.",
+    "Sin conexión segura disponible entre origen y destino.",
 };
 
-const MAX_SELECT_OPTIONS = 150;
+const MAX_SELECT_OPTIONS = 120;
 
-export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProps) {
+export function RoutingPanel({
+  features,
+  nodes = [],
+  isOnline,
+  authToken,
+  externalOriginNodeId,
+  externalDestinationNodeId,
+  onRouteComputed,
+}: RoutingPanelProps) {
   const formTitleId = useId();
   const nodeFilterId = useId();
   const payloadErrorId = useId();
-  const payloadHintId = useId();
 
   const [nodeFilter, setNodeFilter] = useState("");
   const [originNodeId, setOriginNodeId] = useState("");
@@ -72,9 +98,39 @@ export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProp
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [result, setResult] = useState<RoutingCalculateResponse | null>(null);
 
+  useEffect(() => {
+    if (externalOriginNodeId) setOriginNodeId(externalOriginNodeId);
+  }, [externalOriginNodeId]);
+
+  useEffect(() => {
+    if (externalDestinationNodeId) setDestinationNodeId(externalDestinationNodeId);
+  }, [externalDestinationNodeId]);
+
   const allNodeOptions = useMemo(() => {
     const map = new Map<string, string>();
-    for (const f of features) {
+    for (const n of nodes) {
+      const prefix =
+        n.node_type === "HOSPITAL"
+          ? "Hospital"
+          : n.node_type === "TOWN_CENTER"
+            ? "Poblado"
+            : "Punto";
+      if (!map.has(n.node_id)) {
+        map.set(n.node_id, `${n.name} · ${prefix}`);
+      }
+    }
+    const sortedFeatures = [...features].sort((a, b) => {
+      const isGeneric = (name: string) =>
+        name.startsWith("Acceso ") || name.startsWith("Red Vial ") || /^HU-\d+/i.test(name);
+      const aGen = isGeneric(a.properties.corridor_name) ? 1 : 0;
+      const bGen = isGeneric(b.properties.corridor_name) ? 1 : 0;
+      if (aGen !== bGen) return aGen - bGen;
+      const aPaved = a.properties.surface_type === "PAVED" ? 0 : 1;
+      const bPaved = b.properties.surface_type === "PAVED" ? 0 : 1;
+      if (aPaved !== bPaved) return aPaved - bPaved;
+      return b.properties.length_km - a.properties.length_km;
+    });
+    for (const f of sortedFeatures) {
       if (!map.has(f.properties.origin_node_id)) {
         map.set(f.properties.origin_node_id, `Nodo origen (${f.properties.corridor_name})`);
       }
@@ -86,16 +142,16 @@ export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProp
       }
     }
     return Array.from(map.entries());
-  }, [features]);
+  }, [nodes, features]);
 
   const effectiveOrigin = originNodeId || allNodeOptions[0]?.[0] || "";
   const effectiveDest =
     destinationNodeId ||
-    allNodeOptions[allNodeOptions.length - 1]?.[0] ||
+    allNodeOptions[Math.min(1, Math.max(0, allNodeOptions.length - 1))]?.[0] ||
     allNodeOptions[0]?.[0] ||
     "";
 
-  const { visibleNodes, totalMatching } = useMemo(() => {
+  const { visibleNodes } = useMemo(() => {
     const q = nodeFilter.trim().toLowerCase();
     const matching =
       q.length === 0
@@ -115,20 +171,23 @@ export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProp
         }
       }
     }
-    return { visibleNodes: sliced, totalMatching: matching.length };
+    return { visibleNodes: sliced };
   }, [allNodeOptions, nodeFilter, effectiveOrigin, effectiveDest]);
+
+  const handleSwap = () => {
+    setOriginNodeId(effectiveDest);
+    setDestinationNodeId(effectiveOrigin);
+  };
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setErrorMsg(null);
     if (!isOnline) {
-      setErrorMsg(
-        "El cálculo de nueva ruta requiere conexión en línea. Las rutas en caché offline son únicamente informativas."
-      );
+      setErrorMsg("El cálculo de rutas requiere conexión.");
       return;
     }
     if (!effectiveOrigin || !effectiveDest) {
-      setErrorMsg("Debe seleccionar un nodo de origen y destino válidos.");
+      setErrorMsg("Seleccione origen y destino válidos.");
       return;
     }
 
@@ -148,11 +207,35 @@ export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProp
         authToken
       );
       setResult(response);
+
+      if (response.resolution_type === "ALTERNATE_ROUTE") {
+        const segMap = new Map(features.map((f) => [f.properties.segment_id, f]));
+        const coords: [number, number][] = [];
+        for (const hop of response.hops) {
+          const seg = segMap.get(hop.segment_id);
+          if (!seg) continue;
+          const pts =
+            hop.direction === "DEST_TO_ORIGIN"
+              ? [...seg.geometry.coordinates].reverse()
+              : seg.geometry.coordinates;
+          for (const c of pts) {
+            if (c.length >= 2) coords.push([c[0], c[1]]);
+          }
+        }
+        onRouteComputed?.({
+          coordinates: coords,
+          origin: coords[0] ?? null,
+          destination: coords[coords.length - 1] ?? null,
+          label: `${response.total_distance_km.toFixed(1)} km`,
+        });
+      } else {
+        onRouteComputed?.(null);
+      }
     } catch (err) {
       if (err instanceof ApiClientError) {
         setErrorMsg(`${err.errorCode}: ${err.message}`);
       } else {
-        setErrorMsg("No fue posible consultar el enrutador. Verifique conectividad y sesión.");
+        setErrorMsg("No fue posible consultar el enrutador.");
       }
     } finally {
       setSubmitting(false);
@@ -160,122 +243,141 @@ export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProp
   }
 
   return (
-    <section className="card" aria-labelledby={formTitleId}>
-      <h2 id={formTitleId}>Cálculo de Ruta de Apoyo a Decisión</h2>
-      <p className="hint">
-        Toda propuesta exige autorización operativa humana; nunca reemplaza al COER, Defensa Civil ni
-        personal sanitario.
-      </p>
+    <div className="panel-stack" aria-labelledby={formTitleId}>
+      <div className="panel-heading-row">
+        <div>
+          <h2 id={formTitleId} className="panel-title">
+            Planificar ruta
+          </h2>
+          <p className="panel-subtitle">Rutas verificadas según vehículo y clima</p>
+        </div>
+      </div>
 
       {!isOnline && (
-        <div className="banner banner--warning" role="status" style={{ marginBlockEnd: "0.75rem" }}>
-          <span>
-            Modo sin conexión: cálculo de nueva ruta deshabilitado. Consulte solo tramos en caché.
-          </span>
+        <div className="chip-alert chip-alert--amber" role="status">
+          <span>Sin conexión · Cálculo deshabilitado</span>
         </div>
       )}
 
-      <form onSubmit={handleSubmit} aria-labelledby={formTitleId}>
-        <div className="field">
-          <label htmlFor={nodeFilterId}>Filtrar nodos por corredor</label>
+      <form onSubmit={handleSubmit} className="clean-form" aria-labelledby={formTitleId}>
+        <div className="field field--tight">
+          <label htmlFor={nodeFilterId} className="visually-hidden">
+            Filtrar hospitales o localidades
+          </label>
           <input
             id={nodeFilterId}
             type="search"
-            placeholder="Ej. Carpish, Tingo María, Ambo..."
+            placeholder="Filtrar hospital, ciudad o vía..."
             value={nodeFilter}
             onChange={(e) => setNodeFilter(e.target.value)}
           />
-          {totalMatching > MAX_SELECT_OPTIONS && (
-            <span className="hint">
-              Mostrando {visibleNodes.length} de {totalMatching} nodos; afine la búsqueda para
-              reducir la lista.
-            </span>
-          )}
         </div>
 
-        <div className="field">
-          <label htmlFor="route-origin">Nodo origen</label>
-          <select
-            id="route-origin"
-            name="origin_node_id"
-            className="brand-select"
-            required
-            value={effectiveOrigin}
-            onChange={(e) => setOriginNodeId(e.target.value)}
-            data-error="origin-error"
+        <div className="route-stops-card">
+          <div className="route-stops-inputs">
+            <div className="route-stop-row">
+              <span className="stop-dot stop-dot--origin" aria-hidden="true" />
+              <div className="field field--flush" style={{ flex: 1 }}>
+                <label htmlFor="route-origin" className="visually-hidden">
+                  Nodo origen
+                </label>
+                <select
+                  id="route-origin"
+                  name="origin_node_id"
+                  className="brand-select"
+                  required
+                  value={effectiveOrigin}
+                  onChange={(e) => setOriginNodeId(e.target.value)}
+                  data-error="origin-error"
+                >
+                  {visibleNodes.length === 0 ? (
+                    <option value="">Sin origen disponible</option>
+                  ) : (
+                    visibleNodes.map(([id, label]) => (
+                      <option key={id} value={id}>
+                        {label}
+                      </option>
+                    ))
+                  )}
+                </select>
+                <span id="origin-error" className="error-msg">
+                  Seleccione un origen.
+                </span>
+              </div>
+            </div>
+
+            <div className="route-stop-divider" />
+
+            <div className="route-stop-row">
+              <span className="stop-dot stop-dot--dest" aria-hidden="true" />
+              <div className="field field--flush" style={{ flex: 1 }}>
+                <label htmlFor="route-dest" className="visually-hidden">
+                  Nodo destino
+                </label>
+                <select
+                  id="route-dest"
+                  name="destination_node_id"
+                  className="brand-select"
+                  required
+                  value={effectiveDest}
+                  onChange={(e) => setDestinationNodeId(e.target.value)}
+                  data-error="dest-error"
+                >
+                  {visibleNodes.length === 0 ? (
+                    <option value="">Sin destino disponible</option>
+                  ) : (
+                    visibleNodes.map(([id, label]) => (
+                      <option key={id} value={id}>
+                        {label}
+                      </option>
+                    ))
+                  )}
+                </select>
+                <span id="dest-error" className="error-msg">
+                  Seleccione un destino.
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="swap-btn"
+            aria-label="Intercambiar origen y destino"
+            onClick={handleSwap}
           >
-            {visibleNodes.length === 0 ? (
-              <option value="">Sin nodos disponibles</option>
-            ) : (
-              visibleNodes.map(([id, label]) => (
-                <option key={id} value={id}>
-                  {label}
-                </option>
-              ))
-            )}
-          </select>
-          <span id="origin-error" className="error-msg">
-            <span role="img" aria-label="Error">
-              ⚠
-            </span>{" "}
-            Seleccione un nodo de origen.
-          </span>
+            <IconSwap size={16} />
+          </button>
         </div>
 
-        <div className="field">
-          <label htmlFor="route-dest">Nodo destino</label>
-          <select
-            id="route-dest"
-            name="destination_node_id"
-            className="brand-select"
-            required
-            value={effectiveDest}
-            onChange={(e) => setDestinationNodeId(e.target.value)}
-            data-error="dest-error"
-          >
-            {visibleNodes.length === 0 ? (
-              <option value="">Sin nodos disponibles</option>
-            ) : (
-              visibleNodes.map(([id, label]) => (
-                <option key={id} value={id}>
-                  {label}
-                </option>
-              ))
-            )}
-          </select>
-          <span id="dest-error" className="error-msg">
-            <span role="img" aria-label="Error">
-              ⚠
-            </span>{" "}
-            Seleccione un nodo de destino.
-          </span>
-        </div>
-
-        <fieldset>
-          <legend>Categoría vehicular</legend>
-          <div className="choice-grid">
+        <div className="group-block">
+          <span className="section-eyebrow">Vehículo</span>
+          <div className="vehicle-pill-grid" role="radiogroup" aria-label="Categoría vehicular">
             {VEHICLE_OPTIONS.map((opt) => (
               <label key={opt.code} className="choice-card">
                 <input
                   type="radio"
+                  className="visually-hidden"
                   name="vehicle_category_code"
                   value={opt.code}
                   checked={vehicleCode === opt.code}
                   onChange={() => setVehicleCode(opt.code)}
                 />
+                {opt.icon}
                 <span>{opt.label}</span>
               </label>
             ))}
           </div>
-        </fieldset>
+        </div>
 
-        <fieldset>
-          <legend>Tipo de carga o traslado</legend>
-          <div className="choice-grid">
+        <div className="group-block">
+          <span className="section-eyebrow">Traslado</span>
+          <div className="segmented-pills" role="radiogroup" aria-label="Tipo de carga">
             {CARGO_OPTIONS.map((opt) => (
-              <label key={opt.code} className="choice-card">
+              <label key={opt.code} className="segmented-pill">
                 <input
                   type="radio"
+                  className="visually-hidden"
                   name="cargo_type"
                   value={opt.code}
                   checked={cargoType === opt.code}
@@ -285,14 +387,11 @@ export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProp
               </label>
             ))}
           </div>
-        </fieldset>
+        </div>
 
         {cargoType !== "MEDICAL_PATIENT" && (
-          <div className="field">
-            <label htmlFor="cargo-payload-kg">Peso de carga (kg)</label>
-            <span id={payloadHintId} className="hint">
-              Requerido para verificar capacidad real de puente logístico (kg &gt; 0).
-            </span>
+          <div className="field field--tight">
+            <label htmlFor="cargo-payload-kg">Peso estimado (kg)</label>
             <input
               id="cargo-payload-kg"
               name="cargo_payload_kg"
@@ -302,76 +401,63 @@ export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProp
               pattern="^[1-9]\d*(\.\d+)?$"
               value={cargoPayloadKg}
               onChange={(e) => setCargoPayloadKg(e.target.value)}
-              aria-describedby={payloadHintId}
               data-error={payloadErrorId}
             />
             <span id={payloadErrorId} className="error-msg">
-              <span role="img" aria-label="Error">
-                ⚠
-              </span>{" "}
-              Ingrese un peso positivo en kilogramos (ej. 1200).
+              Ingrese un peso mayor a 0 kg.
             </span>
           </div>
         )}
 
         <button
           type="submit"
-          className="btn btn--primary icon-start ico-route"
+          className="btn btn--primary btn--block"
           disabled={submitting || !isOnline || allNodeOptions.length === 0}
         >
-          {submitting ? "Evaluando ruta segura..." : "Calcular ruta verificable"}
+          <IconRoute size={17} />
+          <span>{submitting ? "Evaluando..." : "Calcular ruta verificable"}</span>
         </button>
       </form>
 
       {errorMsg && (
-        <div className="banner banner--danger" role="alert" style={{ marginBlockStart: "1rem" }}>
+        <div className="banner banner--danger" role="alert">
           <span>{errorMsg}</span>
         </div>
       )}
 
       {result && (
-        <div className="card" style={{ marginBlockStart: "1rem" }} aria-live="polite">
-          <h3>Resultado de Enrutamiento</h3>
+        <div className="result-surface" aria-live="polite">
           {result.resolution_type === "ALTERNATE_ROUTE" && (
-            <div>
-              <p>
-                <strong>Ruta Alterna Propuesta</strong> ({result.routing_config_tag}) —{" "}
-                <strong>Autorización operativa: {result.operational_authorization}</strong>
-              </p>
-              <div className="metrics-grid">
-                <div className="metric-box">
-                  <span className="metric-label">Distancia total</span>
-                  <span className="metric-value">{result.total_distance_km.toFixed(1)} km</span>
+            <>
+              <div className="result-top-row">
+                <strong>Ruta recomendada</strong>
+                <span className="risk-badge risk-badge--GREEN">Autorización requerida</span>
+              </div>
+              <div className="stat-pill-grid">
+                <div className="stat-mini">
+                  <strong>{result.total_distance_km.toFixed(1)} km</strong>
+                  <span>Distancia</span>
                 </div>
-                <div className="metric-box">
-                  <span className="metric-label">ETA nominal ({result.eta_quality})</span>
-                  <span className="metric-value">{result.estimated_time_min} min</span>
+                <div className="stat-mini">
+                  <strong>{result.estimated_time_min} min</strong>
+                  <span>
+                    <IconClock size={12} /> Nominal
+                  </span>
                 </div>
-                <div className="metric-box">
-                  <span className="metric-label">IVV máximo en ruta</span>
-                  <span className="metric-value">{result.max_ivv_on_route.toFixed(2)}</span>
-                </div>
-                <div className="metric-box">
-                  <span className="metric-label">Tramos direccionales</span>
-                  <span className="metric-value">{result.hops.length}</span>
+                <div className="stat-mini">
+                  <strong>{result.max_ivv_on_route.toFixed(0)}</strong>
+                  <span>IVV máx</span>
                 </div>
               </div>
-            </div>
+            </>
           )}
 
           {result.resolution_type === "LOGISTIC_BRIDGE_REQUIRED" && (
             <div>
-              <p>
-                <strong>Puente Logístico Propuesto (PROPOSED)</strong> —{" "}
-                <strong>
-                  Autorización operativa: {result.bridge_proposal.operational_authorization}
-                </strong>
-              </p>
-              <p className="hint">
-                Modo: {result.bridge_proposal.transfer_mode} · Longitud:{" "}
-                {result.bridge_proposal.length_m} m · Tiempo estimado de relevo:{" "}
-                {result.bridge_proposal.estimated_transfer_time_min} min · Inspección válida hasta{" "}
-                {new Date(result.bridge_proposal.inspection_expires_at).toLocaleDateString("es-PE")}
+              <strong>Puente logístico sugerido</strong>
+              <p className="panel-subtitle" style={{ marginBlockStart: "0.25rem" }}>
+                Transbordo de {result.bridge_proposal.length_m} m ·{" "}
+                {result.bridge_proposal.estimated_transfer_time_min} min estimados
               </p>
             </div>
           )}
@@ -381,22 +467,13 @@ export function RoutingPanel({ features, isOnline, authToken }: RoutingPanelProp
               <div>
                 <strong>NO_SAFE_ROUTE ({result.reason_code})</strong>
                 <p style={{ marginBlock: "0.25rem 0" }}>
-                  No hay una solución verificable con los datos disponibles:{" "}
                   {REASON_DESCRIPTIONS[result.reason_code]}
                 </p>
               </div>
             </div>
           )}
-
-          {result.warnings && result.warnings.length > 0 && (
-            <ul className="hint" style={{ marginBlockStart: "0.75rem", paddingInlineStart: "1.2rem" }}>
-              {result.warnings.map((w, i) => (
-                <li key={i}>{w}</li>
-              ))}
-            </ul>
-          )}
         </div>
       )}
-    </section>
+    </div>
   );
 }

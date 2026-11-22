@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode 
 export interface TabDefinition {
   id: string;
   label: string;
-  iconClass?: string;
+  icon?: ReactNode;
   badge?: string | number;
   content: ReactNode;
 }
@@ -11,18 +11,33 @@ export interface TabDefinition {
 export interface OperationalTabsProps {
   tabs: TabDefinition[];
   defaultTabId?: string;
+  activeTabId?: string;
+  onChangeTab?: (tabId: string) => void;
 }
 
-export function OperationalTabs({ tabs, defaultTabId }: OperationalTabsProps) {
+export function OperationalTabs({
+  tabs,
+  defaultTabId,
+  activeTabId,
+  onChangeTab,
+}: OperationalTabsProps) {
   const baseId = useId();
   const tablistRef = useRef<HTMLDivElement | null>(null);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const panelRefs = useRef<Array<HTMLDivElement | null>>([]);
 
-  const [activeId, setActiveId] = useState<string>(defaultTabId ?? tabs[0]?.id ?? "");
+  const [internalId, setInternalId] = useState<string>(defaultTabId ?? tabs[0]?.id ?? "");
+  const activeId = activeTabId ?? internalId;
+
+  const setActive = (id: string) => {
+    if (activeTabId === undefined) {
+      setInternalId(id);
+    }
+    onChangeTab?.(id);
+  };
 
   const selectTab = (id: string, focusButton = false, idx?: number) => {
-    setActiveId(id);
+    setActive(id);
     const targetIdx = typeof idx === "number" ? idx : tabs.findIndex((t) => t.id === id);
     const tabEl = targetIdx >= 0 ? tabRefs.current[targetIdx] : null;
     if (tabEl) {
@@ -56,7 +71,7 @@ export function OperationalTabs({ tabs, defaultTabId }: OperationalTabsProps) {
       }
 
       const onBeforeMatch = () => {
-        setActiveId(tab.id);
+        setActive(tab.id);
       };
       panelEl.addEventListener("beforematch", onBeforeMatch);
       cleanups.push(() => panelEl.removeEventListener("beforematch", onBeforeMatch));
@@ -142,14 +157,17 @@ export function OperationalTabs({ tabs, defaultTabId }: OperationalTabsProps) {
               type="button"
               role="tab"
               id={tabDomId}
-              className={`ops-tab${tab.iconClass ? ` icon-start ${tab.iconClass}` : ""}`}
+              className="ops-tab"
               aria-selected={selected}
               tabIndex={selected ? 0 : -1}
               onClick={() => selectTab(tab.id, false, index)}
               {...(selected ? ({ focusgroupstart: "" } as Record<string, string>) : {})}
             >
+              {tab.icon}
               <span>{tab.label}</span>
-              {tab.badge !== undefined && <span className="ops-tab-badge">{tab.badge}</span>}
+              {tab.badge !== undefined && Number(tab.badge) > 0 && (
+                <span className="ops-tab-badge">{tab.badge}</span>
+              )}
             </button>
           );
         })}

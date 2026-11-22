@@ -12,11 +12,30 @@ vi.mock("maplibre-gl", () => {
     getLayer() {
       return null;
     }
+    setLayoutProperty() {}
     setPaintProperty() {}
     setFilter() {}
     fitBounds() {}
+    flyTo() {}
+    zoomIn() {}
+    zoomOut() {}
+    getCanvas() {
+      return { style: { cursor: "" } };
+    }
     getSource() {
       return { setData: () => {} };
+    }
+    remove() {}
+  }
+  class MockPopup {
+    setLngLat() {
+      return this;
+    }
+    setDOMContent() {
+      return this;
+    }
+    addTo() {
+      return this;
     }
     remove() {}
   }
@@ -24,6 +43,7 @@ vi.mock("maplibre-gl", () => {
   return {
     default: {
       Map: MockMap,
+      Popup: MockPopup,
       NavigationControl: MockNavigationControl,
       addProtocol: () => {},
     },
@@ -132,6 +152,12 @@ function createDefaultFetchMock(overrides?: (url: string, init?: RequestInit) =>
         headers: { "Content-Type": "application/json" },
       });
     }
+    if (url.includes("/nodes")) {
+      return new Response(JSON.stringify({ nodes: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     if (url.includes("/incidents")) {
       return new Response(JSON.stringify({ incidents: [] }), {
         status: 200,
@@ -171,7 +197,7 @@ function createDefaultFetchMock(overrides?: (url: string, init?: RequestInit) =>
   });
 }
 
-describe("UI Fail-Safe, Accesibilidad y Consola Operativa PARADIXE SOFT", () => {
+describe("UI Comercial, Fail-Safe y Accesibilidad PARADIXE SOFT", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     try {
@@ -194,7 +220,7 @@ describe("UI Fail-Safe, Accesibilidad y Consola Operativa PARADIXE SOFT", () => 
     }
   });
 
-  it("expone landmarks semanticos unicos, un h1 y aria-invalid=false inicial", async () => {
+  it("expone landmarks semanticos unicos, un h1, controles de mapa y aria-invalid=false inicial", async () => {
     createDefaultFetchMock();
 
     render(<App initialFeatures={SAMPLE_FEATURES} />);
@@ -211,6 +237,8 @@ describe("UI Fail-Safe, Accesibilidad y Consola Operativa PARADIXE SOFT", () => 
     const ivvMeter = screen.getByRole("progressbar", { name: "Índice de Vulnerabilidad Vial" });
     expect(ivvMeter).toHaveAttribute("max", "100");
     expect(screen.getByLabelText("Camioneta 4x4").closest("label")).toHaveClass("choice-card");
+    expect(screen.getByRole("button", { name: "Capas" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mapa" })).toBeInTheDocument();
   });
 
   it("renderiza NO_SAFE_ROUTE con reason_code unico sin inventar ruta", async () => {
@@ -263,6 +291,7 @@ describe("UI Fail-Safe, Accesibilidad y Consola Operativa PARADIXE SOFT", () => 
 
     render(<App initialFeatures={SAMPLE_FEATURES} />);
 
+    fireEvent.click(screen.getByRole("tab", { name: "Explorar" }));
     const provinceSelect = await screen.findByLabelText(/Provincia \(1\)/);
     fireEvent.change(provinceSelect, {
       target: { value: "aaaa0000-0000-4000-8000-000000000002" },
@@ -435,7 +464,6 @@ describe("UI Fail-Safe, Accesibilidad y Consola Operativa PARADIXE SOFT", () => 
 
     render(<App initialFeatures={SAMPLE_FEATURES} />);
 
-    // Autenticar vía diálogo nativo antes de abrir el Simulador COER_ADMIN
     const header = screen.getByRole("banner");
     fireEvent.click(within(header).getByRole("button", { name: "Iniciar sesión" }));
     fireEvent.change(screen.getByLabelText("Contraseña"), {
@@ -445,7 +473,7 @@ describe("UI Fail-Safe, Accesibilidad y Consola Operativa PARADIXE SOFT", () => 
     fireEvent.click(within(authDialog).getByRole("button", { name: "Iniciar sesión" }));
     await within(header).findByText(/COER Huánuco \(Admin\)/);
 
-    const routingTab = screen.getByRole("tab", { name: "Enrutamiento" });
+    const routingTab = screen.getByRole("tab", { name: "Rutas" });
     const simTab = screen.getByRole("tab", { name: "Simulador" });
     fireEvent.click(simTab);
     expect(simTab).toHaveAttribute("aria-selected", "true");
@@ -455,7 +483,7 @@ describe("UI Fail-Safe, Accesibilidad y Consola Operativa PARADIXE SOFT", () => 
       .find((el) => el.getAttribute("aria-labelledby") === routingTab.id);
     expect(routingPanel).toBeDefined();
     expect(routingPanel).toHaveAttribute("hidden", "until-found");
-    expect(screen.getByText(/\[SIMULATION\] Módulo de Contingencia Aislado:/)).toBeInTheDocument();
+    expect(screen.getByText(/\[SIMULATION\]/)).toBeInTheDocument();
 
     const createBtn = await screen.findByRole("button", { name: "Crear escenario aislado" });
     fireEvent.click(createBtn);
@@ -468,6 +496,76 @@ describe("UI Fail-Safe, Accesibilidad y Consola Operativa PARADIXE SOFT", () => 
     await waitFor(() => {
       expect(screen.getByText(/Delta CO₂: -3\.90 kg/)).toBeInTheDocument();
       expect(screen.getByText(/Ahorro neto: \$151\.67/)).toBeInTheDocument();
+    });
+  });
+
+  it("permite a COER_ADMIN certificar atributos fisicos desde el inspector contextual", async () => {
+    const fetchSpy = createDefaultFetchMock((url, init) => {
+      if (url.endsWith("/auth/login")) {
+        return new Response(
+          JSON.stringify({
+            access_token: "mock.jwt.token",
+            refresh_token: "mock-refresh",
+            token_type: "Bearer",
+            expires_in_sec: 900,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (url.endsWith("/auth/me")) {
+        return new Response(
+          JSON.stringify({
+            user_id: "00000000-0000-4000-8000-000000000001",
+            phone_e164: "+51962000100",
+            full_name: "COER Huánuco (Admin)",
+            role_code: "COER_ADMIN",
+            reputation_score: 1.0,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      if (url.includes("/segments/") && url.endsWith("/attributes") && init?.method === "PATCH") {
+        return new Response(
+          JSON.stringify({
+            segment_id: "33333333-3333-4333-8333-333333333333",
+            corridor_name: "Huánuco – Túnel Carpish",
+            surface_type: "PAVED",
+            road_width_m: 6.5,
+            max_supported_tons: 30,
+            max_slope_forward_pct: 18,
+            max_slope_reverse_pct: 18,
+            is_historical_hotspot: true,
+            geometry_source: "FIELD_SURVEY",
+            attributes_verified_at: "2026-11-22T17:20:00Z",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      return null;
+    });
+
+    render(<App initialFeatures={SAMPLE_FEATURES} />);
+
+    const header = screen.getByRole("banner");
+    fireEvent.click(within(header).getByRole("button", { name: "Iniciar sesión" }));
+    fireEvent.change(screen.getByLabelText("Contraseña"), {
+      target: { value: "ParadixeDev2026!" },
+    });
+    const authDialog = screen.getByRole("dialog", { name: "Acceso de Operador Territorial" });
+    fireEvent.click(within(authDialog).getByRole("button", { name: "Iniciar sesión" }));
+    await within(header).findByText(/COER Huánuco \(Admin\)/);
+
+    const certifyBtn = await screen.findByRole("button", { name: "Certificar tramo" });
+    fireEvent.click(certifyBtn);
+
+    await waitFor(() => {
+      expect(
+        fetchSpy.mock.calls.some(
+          ([u, init]) =>
+            String(u).endsWith("/segments/33333333-3333-4333-8333-333333333333/attributes") &&
+            (init as RequestInit | undefined)?.method === "PATCH"
+        )
+      ).toBe(true);
     });
   });
 });

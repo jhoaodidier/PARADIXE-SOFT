@@ -3,14 +3,19 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#f1f5f9" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#070b14" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0b1120" media="(prefers-color-scheme: dark)" />
     <script>
       try {
         var savedScheme = localStorage.getItem("color-scheme");
-        if (savedScheme === "light" || savedScheme === "dark") {
-          document.querySelector('meta[name="color-scheme"]').content = savedScheme;
+        var meta = document.querySelector('meta[name="color-scheme"]');
+        if (meta) {
+          if (savedScheme === "dark" || savedScheme === "light") {
+            meta.content = savedScheme;
+          } else if (savedScheme === "system") {
+            meta.content = "light dark";
+          }
         }
       } catch (e) {}
     </script>
@@ -18,10 +23,10 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap"
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
     />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
-    <title>PARADIXE SOFT | Resiliencia Vial y Logística Crítica</title>
+    <title>PARADIXE — Vías y Rutas en Vivo</title>
   </head>
   <body>
     <div id="root"></div>

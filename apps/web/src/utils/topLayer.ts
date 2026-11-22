@@ -6,6 +6,46 @@ export function ensurePopoverPolyfill(): void {
   }
 }
 
+export function attachAnchoredPopoverPosition(
+  triggerEl: HTMLElement | null,
+  popoverEl: HTMLElement | null
+): () => void {
+  if (
+    !triggerEl ||
+    !popoverEl ||
+    typeof window === "undefined" ||
+    window.CSS?.supports?.("position-area: block-start")
+  ) {
+    return () => {};
+  }
+
+  const updatePosition = () => {
+    const rect = triggerEl.getBoundingClientRect();
+    const gap = 10;
+    const rightOffset = Math.max(12, window.innerWidth - rect.right);
+    const bottomOffset = Math.max(12, window.innerHeight - rect.top + gap);
+    popoverEl.style.position = "fixed";
+    popoverEl.style.inset = "auto";
+    popoverEl.style.margin = "0";
+    popoverEl.style.right = `${rightOffset}px`;
+    popoverEl.style.bottom = `${bottomOffset}px`;
+  };
+
+  const onToggle = (event: Event) => {
+    const toggleEvent = event as Event & { newState?: string };
+    if (toggleEvent.newState === "open") {
+      updatePosition();
+    }
+  };
+
+  popoverEl.addEventListener("beforetoggle", onToggle);
+  window.addEventListener("resize", updatePosition, { passive: true });
+  return () => {
+    popoverEl.removeEventListener("beforetoggle", onToggle);
+    window.removeEventListener("resize", updatePosition);
+  };
+}
+
 export function canTransitionDisplay(): boolean {
   if (cachedSupportsDisplayTransition !== undefined) {
     return cachedSupportsDisplayTransition;

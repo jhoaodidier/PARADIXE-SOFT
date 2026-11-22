@@ -9,6 +9,7 @@ import {
   type IncidentListItem,
   type RoleCode,
 } from "../api/client.ts";
+import { IconBridge } from "./Icons.tsx";
 
 export interface BridgesPanelProps {
   operations: BridgesOperationsResponse | null;
@@ -20,6 +21,29 @@ export interface BridgesPanelProps {
   onRefreshOperations: () => Promise<void>;
   onToast: (message: string) => void;
 }
+
+const TRANSFER_MODE_LABELS = {
+  PEDESTRIAN_SAFE_PATH: "Paso peatonal seguro",
+  SHUTTLE_RELAY: "Relevo vehicular",
+} as const;
+
+const CARGO_LABELS: Record<CargoType, string> = {
+  MEDICAL_SUPPLIES: "Insumos médicos",
+  MEDICAL_PATIENT: "Paciente crítico",
+  PERISHABLE_AGRI: "Carga agrícola",
+};
+
+const BRIDGE_STATUS_LABELS = {
+  PROPOSED: "Propuesto",
+  ACTIVE: "Activo",
+  SUSPENDED_UNSAFE: "Suspendido",
+  COMPLETED: "Completado",
+} as const;
+
+const DIRECTION_LABELS = {
+  ORIGIN_TO_DEST: "Ida",
+  DEST_TO_ORIGIN: "Retorno",
+} as const;
 
 export function BridgesPanel({
   operations,
@@ -82,12 +106,12 @@ export function BridgesPanel({
         authToken
       );
       await onRefreshOperations();
-      onToast("Puente logístico propuesto correctamente.");
+      onToast("Puente logístico propuesto.");
     } catch (err) {
       if (err instanceof ApiClientError) {
         setErrorMsg(`${err.errorCode}: ${err.message}`);
       } else {
-        setErrorMsg("No fue posible proponer el puente logístico.");
+        setErrorMsg("No fue posible proponer el puente.");
       }
     } finally {
       setBusy(false);
@@ -104,12 +128,12 @@ export function BridgesPanel({
     try {
       await patchBridgeStatus(bridgeId, status, authToken);
       await onRefreshOperations();
-      onToast(`Estado de puente actualizado a ${status}.`);
+      onToast(`Puente actualizado a ${BRIDGE_STATUS_LABELS[status]}.`);
     } catch (err) {
       if (err instanceof ApiClientError) {
         setErrorMsg(`${err.errorCode}: ${err.message}`);
       } else {
-        setErrorMsg("No fue posible actualizar el puente logístico.");
+        setErrorMsg("No fue posible actualizar el puente.");
       }
     } finally {
       setBusy(false);
@@ -136,12 +160,12 @@ export function BridgesPanel({
         authToken
       );
       await onRefreshOperations();
-      onToast("Ventana humanitaria programada correctamente.");
+      onToast("Ventana humanitaria programada.");
     } catch (err) {
       if (err instanceof ApiClientError) {
         setErrorMsg(`${err.errorCode}: ${err.message}`);
       } else {
-        setErrorMsg("No fue posible programar la ventana humanitaria.");
+        setErrorMsg("No fue posible programar la ventana.");
       }
     } finally {
       setBusy(false);
@@ -149,206 +173,207 @@ export function BridgesPanel({
   }
 
   return (
-    <section className="card" aria-labelledby={headingId}>
-      <h2 id={headingId}>Puentes Logísticos y Ventanas Humanitarias</h2>
-      <p className="hint">
-        Gestión de transbordos verificados y ventanas direccionales en paso alternado. Un operador
-        de salud puede proponer puentes, pero solo COER o Defensa Civil activan el corredor.
-      </p>
+    <div className="panel-stack" aria-labelledby={headingId}>
+      <div className="panel-heading-row">
+        <div>
+          <h2 id={headingId} className="panel-title">
+            Puentes y Ventanas
+          </h2>
+          <p className="panel-subtitle">Transbordos y paso alternado</p>
+        </div>
+      </div>
 
       {!authToken && (
-        <div className="banner banner--info" style={{ marginBlockEnd: "0.75rem" }}>
-          <span>Inicie sesión institucional para proponer o autorizar puentes y ventanas.</span>
-          <button type="button" onClick={onOpenAuthModal}>
-            Iniciar sesión
+        <div className="auth-nudge-card">
+          <span>Autoriza puentes con tu cuenta</span>
+          <button type="button" className="btn btn--sm" onClick={onOpenAuthModal}>
+            Entrar
           </button>
         </div>
       )}
 
       {errorMsg && (
-        <div className="banner banner--danger" role="alert" style={{ marginBlockEnd: "0.75rem" }}>
+        <div className="banner banner--danger" role="alert">
           <span>{errorMsg}</span>
         </div>
       )}
 
-      <h3>Corredores de Transbordo Inspeccionados ({transferCorridors.length})</h3>
-      {transferCorridors.length === 0 ? (
-        <p className="hint">No hay corredores peatonales o de relevo cargados aún.</p>
+      {bridges.length === 0 && windows.length === 0 && transferCorridors.length === 0 ? (
+        <div className="empty-state-card">
+          <IconBridge size={22} />
+          <strong>Sin puentes activos</strong>
+          <span>Cuando exista un corte de vía podrás habilitar transbordos aquí.</span>
+        </div>
       ) : (
-        <ul className="ops-card-list" style={{ marginBlockEnd: "1rem" }}>
-          {transferCorridors.map((c) => (
-            <li key={c.corridor_id} className="ops-list-item">
-              <div className="ops-item-top">
-                <strong>
-                  {c.transfer_mode} ({c.length_m} m)
-                </strong>
-                <span
-                  className={`risk-badge ${
-                    c.requires_revalidation || !c.is_verified_safe
-                      ? "risk-badge--RED"
-                      : "risk-badge--GREEN"
-                  }`}
-                >
-                  {c.requires_revalidation
-                    ? "REVALIDACIÓN REQUERIDA"
-                    : c.is_verified_safe
-                      ? `IVV máx ${c.max_safe_ivv.toFixed(0)}`
-                      : "NO VERIFICADO"}
-                </span>
-              </div>
-              <p className="hint" style={{ marginBlock: "0.25rem 0" }}>
-                Pendiente: {c.max_slope_pct.toFixed(1)}% · Cargas: {c.cargo_types.join(", ") || "—"}
-              </p>
-            </li>
-          ))}
-        </ul>
-      )}
+        <>
+          {bridges.length > 0 && (
+            <div className="group-block">
+              <span className="section-eyebrow">Puentes logísticos ({bridges.length})</span>
+              <ul className="ops-card-list">
+                {bridges.map((b) => (
+                  <li key={b.bridge_id} className="ops-list-item">
+                    <div className="ops-item-top">
+                      <strong>{CARGO_LABELS[b.cargo_type]}</strong>
+                      <span
+                        className={`risk-badge ${
+                          b.status === "ACTIVE"
+                            ? "risk-badge--GREEN"
+                            : b.status === "SUSPENDED_UNSAFE"
+                              ? "risk-badge--RED"
+                              : "risk-badge--AMBER"
+                        }`}
+                      >
+                        {BRIDGE_STATUS_LABELS[b.status]}
+                      </span>
+                    </div>
+                    {canAuthorizeOperations && b.status !== "COMPLETED" && (
+                      <div className="ops-actions-row" style={{ marginBlockStart: "0.5rem" }}>
+                        {b.status !== "ACTIVE" && (
+                          <button
+                            type="button"
+                            className="btn btn--sm"
+                            disabled={!isOnline || busy}
+                            onClick={() => void handleUpdateBridgeStatus(b.bridge_id, "ACTIVE")}
+                          >
+                            Activar
+                          </button>
+                        )}
+                        {b.status !== "SUSPENDED_UNSAFE" && (
+                          <button
+                            type="button"
+                            className="btn btn--sm"
+                            disabled={!isOnline || busy}
+                            onClick={() =>
+                              void handleUpdateBridgeStatus(b.bridge_id, "SUSPENDED_UNSAFE")
+                            }
+                          >
+                            Suspender
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn btn--sm"
+                          disabled={!isOnline || busy}
+                          onClick={() => void handleUpdateBridgeStatus(b.bridge_id, "COMPLETED")}
+                        >
+                          Completar
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
-      <h3>Puentes Logísticos Activos / Propuestos ({bridges.length})</h3>
-      {bridges.length === 0 ? (
-        <p className="hint">No hay puentes logísticos registrados actualmente.</p>
-      ) : (
-        <ul className="ops-card-list" style={{ marginBlockEnd: "1rem" }}>
-          {bridges.map((b) => (
-            <li key={b.bridge_id} className="ops-list-item">
-              <div className="ops-item-top">
-                <strong>{b.cargo_type}</strong>
-                <span
-                  className={`risk-badge ${
-                    b.status === "ACTIVE"
-                      ? "risk-badge--GREEN"
-                      : b.status === "SUSPENDED_UNSAFE"
-                        ? "risk-badge--RED"
-                        : "risk-badge--AMBER"
-                  }`}
-                >
-                  {b.status}
-                </span>
-              </div>
-              <p className="hint" style={{ marginBlock: "0.25rem 0.5rem" }}>
-                Creado: {new Date(b.created_at).toLocaleString("es-PE")}
-              </p>
-              {canAuthorizeOperations && b.status !== "COMPLETED" && (
-                <div className="ops-actions-row">
-                  {b.status !== "ACTIVE" && (
-                    <button
-                      type="button"
-                      disabled={!isOnline || busy}
-                      onClick={() => void handleUpdateBridgeStatus(b.bridge_id, "ACTIVE")}
-                    >
-                      Activar
-                    </button>
-                  )}
-                  {b.status !== "SUSPENDED_UNSAFE" && (
-                    <button
-                      type="button"
-                      disabled={!isOnline || busy}
-                      onClick={() =>
-                        void handleUpdateBridgeStatus(b.bridge_id, "SUSPENDED_UNSAFE")
-                      }
-                    >
-                      Suspender
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    disabled={!isOnline || busy}
-                    onClick={() => void handleUpdateBridgeStatus(b.bridge_id, "COMPLETED")}
-                  >
-                    Completar
-                  </button>
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
+          {windows.length > 0 && (
+            <div className="group-block">
+              <span className="section-eyebrow">Ventanas humanitarias ({windows.length})</span>
+              <ul className="ops-card-list">
+                {windows.map((w) => (
+                  <li key={w.window_id} className="ops-list-item">
+                    <div className="ops-item-top">
+                      <strong>
+                        {w.vehicle_category_code} · {DIRECTION_LABELS[w.direction]}
+                      </strong>
+                      <span className="risk-badge risk-badge--GREEN">{w.status}</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {transferCorridors.length > 0 && (
+            <div className="group-block">
+              <span className="section-eyebrow">
+                Pasos inspeccionados ({transferCorridors.length})
+              </span>
+              <ul className="ops-card-list">
+                {transferCorridors.map((c) => (
+                  <li key={c.corridor_id} className="ops-list-item">
+                    <div className="ops-item-top">
+                      <strong>
+                        {TRANSFER_MODE_LABELS[c.transfer_mode]} ({c.length_m} m)
+                      </strong>
+                      <span
+                        className={`risk-badge ${
+                          c.requires_revalidation || !c.is_verified_safe
+                            ? "risk-badge--RED"
+                            : "risk-badge--GREEN"
+                        }`}
+                      >
+                        {c.is_verified_safe ? "Habilitado" : "Revalidar"}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
       )}
 
       {canProposeBridge && incidents.length > 0 && transferCorridors.length > 0 && (
-        <form onSubmit={handleProposeBridge} className="subform-box">
-          <h3>Proponer Puente Logístico</h3>
-          <div className="field">
-            <label htmlFor="bridge-incident">Incidente asociado</label>
-            <select
-              id="bridge-incident"
-              className="brand-select"
-              value={effIncident}
-              onChange={(e) => setIncidentId(e.target.value)}
-            >
-              {incidents.map((i) => (
-                <option key={i.incident_id} value={i.incident_id}>
-                  {i.corridor_name} ({i.verification_state} · {i.impact_passability})
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="bridge-corridor">Corredor de transbordo</label>
-            <select
-              id="bridge-corridor"
-              className="brand-select"
-              value={effCorridor}
-              onChange={(e) => setCorridorId(e.target.value)}
-            >
-              {transferCorridors.map((c) => (
-                <option key={c.corridor_id} value={c.corridor_id}>
-                  {c.transfer_mode} ({c.length_m} m)
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="bridge-cargo">Tipo de carga</label>
-            <select
-              id="bridge-cargo"
-              className="brand-select"
-              value={cargoType}
-              onChange={(e) => setCargoType(e.target.value as CargoType)}
-            >
-              <option value="MEDICAL_SUPPLIES">MEDICAL_SUPPLIES</option>
-              <option value="MEDICAL_PATIENT">MEDICAL_PATIENT</option>
-              <option value="PERISHABLE_AGRI">PERISHABLE_AGRI</option>
-            </select>
-          </div>
-          <button type="submit" className="btn btn--primary" disabled={!isOnline || busy}>
-            Proponer puente
-          </button>
-        </form>
+        <details className="disclosure-card">
+          <summary>Proponer nuevo puente</summary>
+          <form onSubmit={handleProposeBridge} className="clean-form" style={{ marginBlockStart: "0.75rem" }}>
+            <div className="field field--tight">
+              <label htmlFor="bridge-incident">Incidente</label>
+              <select
+                id="bridge-incident"
+                className="brand-select"
+                value={effIncident}
+                onChange={(e) => setIncidentId(e.target.value)}
+              >
+                {incidents.map((i) => (
+                  <option key={i.incident_id} value={i.incident_id}>
+                    {i.corridor_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field field--tight">
+              <label htmlFor="bridge-corridor">Paso de transbordo</label>
+              <select
+                id="bridge-corridor"
+                className="brand-select"
+                value={effCorridor}
+                onChange={(e) => setCorridorId(e.target.value)}
+              >
+                {transferCorridors.map((c) => (
+                  <option key={c.corridor_id} value={c.corridor_id}>
+                    {TRANSFER_MODE_LABELS[c.transfer_mode]} ({c.length_m} m)
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field field--tight">
+              <label htmlFor="bridge-cargo">Tipo de carga</label>
+              <select
+                id="bridge-cargo"
+                className="brand-select"
+                value={cargoType}
+                onChange={(e) => setCargoType(e.target.value as CargoType)}
+              >
+                <option value="MEDICAL_SUPPLIES">Insumos médicos</option>
+                <option value="MEDICAL_PATIENT">Paciente crítico</option>
+                <option value="PERISHABLE_AGRI">Carga agrícola</option>
+              </select>
+            </div>
+            <button type="submit" className="btn btn--primary btn--block" disabled={!isOnline || busy}>
+              Proponer puente
+            </button>
+          </form>
+        </details>
       )}
 
-      <h3 style={{ marginBlockStart: "1rem" }}>Ventanas Humanitarias ({windows.length})</h3>
-      {windows.length === 0 ? (
-        <p className="hint">No existen ventanas humanitarias registradas.</p>
-      ) : (
-        <ul className="ops-card-list" style={{ marginBlockEnd: "1rem" }}>
-          {windows.map((w) => (
-            <li key={w.window_id} className="ops-list-item">
-              <div className="ops-item-top">
-                <strong>
-                  {w.vehicle_category_code} ({w.direction})
-                </strong>
-                <span className="risk-badge risk-badge--GREEN">{w.status}</span>
-              </div>
-              <p className="hint" style={{ marginBlock: "0.25rem 0" }}>
-                {new Date(w.starts_at).toLocaleString("es-PE")} →{" "}
-                {new Date(w.ends_at).toLocaleString("es-PE")}
-              </p>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {canAuthorizeOperations &&
-        (confirmedPartialIncidents.length === 0 || vehicles.length === 0 ? (
-          <p className="hint">
-            Para programar una ventana humanitaria confirme primero un incidente{" "}
-            <code>PARTIAL_ONE_LANE</code> en la pestaña Incidentes.
-          </p>
-        ) : (
-          <form onSubmit={handleCreateWindow} className="subform-box">
-            <h3>Programar Ventana Humanitaria</h3>
-            <div className="field">
-              <label htmlFor="win-incident">Incidente confirmado (1 carril)</label>
+      {canAuthorizeOperations && confirmedPartialIncidents.length > 0 && vehicles.length > 0 && (
+        <details className="disclosure-card">
+          <summary>Programar ventana humanitaria</summary>
+          <form onSubmit={handleCreateWindow} className="clean-form" style={{ marginBlockStart: "0.75rem" }}>
+            <div className="field field--tight">
+              <label htmlFor="win-incident">Incidente (1 carril)</label>
               <select
                 id="win-incident"
                 className="brand-select"
@@ -362,8 +387,8 @@ export function BridgesPanel({
                 ))}
               </select>
             </div>
-            <div className="field">
-              <label htmlFor="win-vehicle">Categoría vehicular autorizada</label>
+            <div className="field field--tight">
+              <label htmlFor="win-vehicle">Vehículo autorizado</label>
               <select
                 id="win-vehicle"
                 className="brand-select"
@@ -377,36 +402,39 @@ export function BridgesPanel({
                 ))}
               </select>
             </div>
-            <div className="field">
-              <label htmlFor="win-dir">Sentido habilitado</label>
-              <select
-                id="win-dir"
-                className="brand-select"
-                value={direction}
-                onChange={(e) =>
-                  setDirection(e.target.value as "ORIGIN_TO_DEST" | "DEST_TO_ORIGIN")
-                }
-              >
-                <option value="ORIGIN_TO_DEST">ORIGIN_TO_DEST (Ida)</option>
-                <option value="DEST_TO_ORIGIN">DEST_TO_ORIGIN (Retorno)</option>
-              </select>
+            <div className="two-col-inline">
+              <div className="field field--tight">
+                <label htmlFor="win-dir">Sentido</label>
+                <select
+                  id="win-dir"
+                  className="brand-select"
+                  value={direction}
+                  onChange={(e) =>
+                    setDirection(e.target.value as "ORIGIN_TO_DEST" | "DEST_TO_ORIGIN")
+                  }
+                >
+                  <option value="ORIGIN_TO_DEST">Ida</option>
+                  <option value="DEST_TO_ORIGIN">Retorno</option>
+                </select>
+              </div>
+              <div className="field field--tight">
+                <label htmlFor="win-duration">Minutos</label>
+                <input
+                  id="win-duration"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="^\d+$"
+                  value={durationMin}
+                  onChange={(e) => setDurationMin(e.target.value)}
+                />
+              </div>
             </div>
-            <div className="field">
-              <label htmlFor="win-duration">Duración desde ahora (minutos)</label>
-              <input
-                id="win-duration"
-                type="text"
-                inputMode="numeric"
-                pattern="^\d+$"
-                value={durationMin}
-                onChange={(e) => setDurationMin(e.target.value)}
-              />
-            </div>
-            <button type="submit" className="btn btn--primary" disabled={!isOnline || busy}>
+            <button type="submit" className="btn btn--primary btn--block" disabled={!isOnline || busy}>
               Autorizar ventana
             </button>
           </form>
-        ))}
-    </section>
+        </details>
+      )}
+    </div>
   );
 }

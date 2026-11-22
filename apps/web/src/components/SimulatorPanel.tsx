@@ -14,6 +14,8 @@ import {
   type SimScenarioResponse,
   type VehicleCategoryCode,
 } from "../api/client.ts";
+import type { RouteOverlayData } from "./CorridorMap.tsx";
+import { IconSparkles } from "./Icons.tsx";
 
 export interface SimulatorPanelProps {
   isOnline: boolean;
@@ -21,6 +23,7 @@ export interface SimulatorPanelProps {
   userRole: RoleCode | null;
   onOpenAuthModal: () => void;
   onToast: (message: string) => void;
+  onVisualizeSimulation?: (overlay: RouteOverlayData | null) => void;
 }
 
 const NODE_HUANUCO = "10000000-0000-4000-8000-000000000001";
@@ -29,17 +32,68 @@ const SEG_CARPISH_TUNNEL = "20000000-0000-4000-8000-000000000002";
 const SEG_HUANUCO_CARPISH = "20000000-0000-4000-8000-000000000001";
 const SEG_CARPISH_TINGO = "20000000-0000-4000-8000-000000000003";
 
+const CARPISH_DRILL_LINE: [number, number][] = [
+  [-76.2422, -9.9306],
+  [-76.165, -9.82],
+  [-76.091, -9.712],
+  [-75.998, -9.301],
+];
+
+function ImpactBar({
+  label,
+  baselineValue,
+  mitigatedValue,
+  unit,
+  deltaText,
+}: {
+  label: string;
+  baselineValue: number;
+  mitigatedValue: number | null;
+  unit: string;
+  deltaText: string;
+}) {
+  const max = Math.max(baselineValue, mitigatedValue ?? 0, 1);
+  const basePct = Math.round((baselineValue / max) * 100);
+  const mitPct = mitigatedValue !== null ? Math.round((mitigatedValue / max) * 100) : 0;
+
+  return (
+    <div className="impact-bar-card">
+      <div className="impact-bar-head">
+        <strong>{label}</strong>
+        <span className="impact-delta-tag">{deltaText}</span>
+      </div>
+      <div className="impact-bar-row">
+        <span>Sin mitigación</span>
+        <div className="impact-track">
+          <div className="impact-fill impact-fill--base" style={{ width: `${basePct}%` }} />
+        </div>
+        <small>
+          {baselineValue.toFixed(1)} {unit}
+        </small>
+      </div>
+      <div className="impact-bar-row">
+        <span>Con ruta</span>
+        <div className="impact-track">
+          <div className="impact-fill impact-fill--mit" style={{ width: `${mitPct}%` }} />
+        </div>
+        <small>
+          {mitigatedValue !== null ? `${mitigatedValue.toFixed(1)} ${unit}` : "—"}
+        </small>
+      </div>
+    </div>
+  );
+}
+
 export function SimulatorPanel({
   isOnline,
   authToken,
   userRole,
   onOpenAuthModal,
   onToast,
+  onVisualizeSimulation,
 }: SimulatorPanelProps) {
   const headingId = useId();
-  const [scenarioName, setScenarioName] = useState(
-    "Simulacro Huánuco – Carpish (Lluvias Extremas)"
-  );
+  const [scenarioName, setScenarioName] = useState("Simulacro Huánuco – Carpish");
   const [scenario, setScenario] = useState<SimScenarioResponse | null>(null);
   const [revision, setRevision] = useState(0);
 
@@ -85,12 +139,18 @@ export function SimulatorPanel({
       setSimRouting(null);
       setSimEval(null);
       setSimImpact(null);
-      onToast("Escenario de simulacro creado en módulo aislado.");
+      onVisualizeSimulation?.({
+        coordinates: CARPISH_DRILL_LINE,
+        origin: CARPISH_DRILL_LINE[0],
+        destination: CARPISH_DRILL_LINE[CARPISH_DRILL_LINE.length - 1],
+        label: "Simulacro Carpish",
+      });
+      onToast("Simulacro listo.");
     } catch (err) {
       if (err instanceof ApiClientError) {
         setErrorMsg(`${err.errorCode}: ${err.message}`);
       } else {
-        setErrorMsg("No fue posible crear el escenario de simulacro.");
+        setErrorMsg("No fue posible crear el simulacro.");
       }
     } finally {
       setBusy(false);
@@ -123,12 +183,18 @@ export function SimulatorPanel({
       const res = await postSimInjectEvent(scenario.scenario_id, payload, authToken);
       setRevision((r) => r + 1);
       setNotifications((prev) => [...res.simulated_notifications, ...prev]);
-      onToast("Evento sintético inyectado en entorno [SIMULATION].");
+      onVisualizeSimulation?.({
+        coordinates: CARPISH_DRILL_LINE,
+        origin: CARPISH_DRILL_LINE[0],
+        destination: CARPISH_DRILL_LINE[CARPISH_DRILL_LINE.length - 1],
+        hazard: { lat: -9.712, lon: -76.091, label: "Evento simulado Carpish" },
+      });
+      onToast("Evento inyectado en [SIMULATION].");
     } catch (err) {
       if (err instanceof ApiClientError) {
         setErrorMsg(`${err.errorCode}: ${err.message}`);
       } else {
-        setErrorMsg("No fue posible inyectar el evento sintético.");
+        setErrorMsg("No fue posible inyectar el evento.");
       }
     } finally {
       setBusy(false);
@@ -179,12 +245,12 @@ export function SimulatorPanel({
 
       const impactRes = await fetchSimImpact(scenario.scenario_id, authToken);
       setSimImpact(impactRes);
-      onToast("Evaluación de impacto socioeconómico completada.");
+      onToast("Impacto simulado calculado.");
     } catch (err) {
       if (err instanceof ApiClientError) {
         setErrorMsg(`${err.errorCode}: ${err.message}`);
       } else {
-        setErrorMsg("Error al ejecutar la evaluación del simulacro.");
+        setErrorMsg("Error al evaluar el simulacro.");
       }
     } finally {
       setBusy(false);
@@ -197,38 +263,40 @@ export function SimulatorPanel({
       : null;
 
   return (
-    <section className="card" aria-labelledby={headingId}>
-      <h2 id={headingId}>Simulador de Crisis y Contingencia</h2>
-      <div className="banner banner--warning" role="status" style={{ marginBlockEnd: "0.75rem" }}>
-        <span>
-          <strong>[SIMULATION] Módulo de Contingencia Aislado:</strong> opera sobre el fixture{" "}
-          <code>huanuco-carpish-drill-v1</code> con pool de solo lectura operativo y pasarela de
-          mensajería simulada (nunca afecta la operación real).
+    <div className="panel-stack" aria-labelledby={headingId}>
+      <div className="panel-heading-row">
+        <div>
+          <h2 id={headingId} className="panel-title">
+            Simulador de Crisis
+          </h2>
+          <p className="panel-subtitle">[SIMULATION] Entorno aislado · sin efecto real</p>
+        </div>
+        <span className="risk-badge risk-badge--AMBER">
+          <IconSparkles size={13} />
+          <span>Modo prueba</span>
         </span>
       </div>
 
       {!isCoerAdmin ? (
-        <div className="banner banner--info">
-          <span>
-            Ejecutar escenarios What-If e impacto requiere una sesión con rol{" "}
-            <strong>COER_ADMIN</strong>.
-          </span>
-          <button type="button" className="btn btn--primary" onClick={onOpenAuthModal}>
+        <div className="empty-state-card">
+          <IconSparkles size={22} />
+          <strong>Acceso de administrador COER</strong>
+          <span>Inicia sesión como COER_ADMIN para simular escenarios.</span>
+          <button type="button" className="btn btn--primary btn--sm" onClick={onOpenAuthModal}>
             Iniciar sesión (COER_ADMIN)
           </button>
         </div>
       ) : (
-        <div>
+        <div className="panel-stack">
           {errorMsg && (
-            <div className="banner banner--danger" role="alert" style={{ marginBlockEnd: "1rem" }}>
+            <div className="banner banner--danger" role="alert">
               <span>{errorMsg}</span>
             </div>
           )}
 
           <form onSubmit={handleCreateScenario} className="subform-box">
-            <h3>1. Escenario Huánuco – Carpish</h3>
-            <div className="field">
-              <label htmlFor="sim-scenario-name">Nombre del simulacro</label>
+            <div className="field field--tight">
+              <label htmlFor="sim-scenario-name">Nombre del escenario</label>
               <input
                 id="sim-scenario-name"
                 type="text"
@@ -238,54 +306,51 @@ export function SimulatorPanel({
                 onChange={(e) => setScenarioName(e.target.value)}
               />
             </div>
-            <button type="submit" className="btn btn--primary" disabled={!isOnline || busy}>
-              {scenario ? "Reiniciar nuevo escenario" : "Crear escenario aislado"}
+            <button type="submit" className="btn btn--primary btn--block" disabled={!isOnline || busy}>
+              {scenario ? "Reiniciar escenario" : "Crear escenario aislado"}
             </button>
-            {scenario && (
-              <p className="hint" style={{ marginBlock: "0.5rem 0" }}>
-                Escenario activo: <code>{scenario.scenario_id}</code> · Revisión:{" "}
-                <strong>{revision}</strong>
-              </p>
-            )}
           </form>
 
           {scenario && (
             <>
               <form onSubmit={handleInjectEvent} className="subform-box">
-                <h3>2. Inyectar Evento Geotécnico / Climático</h3>
-                <div className="field">
-                  <label htmlFor="sim-segment">Tramo del fixture Carpish</label>
+                <span className="section-eyebrow">1. Evento en corredor Carpish</span>
+                <div className="filter-chips-row" style={{ marginBlockEnd: "0.65rem" }}>
+                  {(
+                    [
+                      ["WEATHER", "Lluvia extrema"],
+                      ["BLOCKED", "Bloqueo total"],
+                      ["PARTIAL", "Paso 1 carril"],
+                    ] as const
+                  ).map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={`filter-chip${eventMode === mode ? " is-active" : ""}`}
+                      onClick={() => setEventMode(mode)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="field field--tight">
+                  <label htmlFor="sim-segment">Tramo Carpish</label>
                   <select
                     id="sim-segment"
                     className="brand-select"
                     value={targetSegId}
                     onChange={(e) => setTargetSegId(e.target.value)}
                   >
-                    <option value={SEG_CARPISH_TUNNEL}>Túnel Carpish (8 km, 27%)</option>
+                    <option value={SEG_CARPISH_TUNNEL}>Túnel Carpish (8 km)</option>
                     <option value={SEG_HUANUCO_CARPISH}>Huánuco – Carpish Sur (45 km)</option>
                     <option value={SEG_CARPISH_TINGO}>Carpish Norte – Tingo María (65 km)</option>
                   </select>
                 </div>
 
-                <div className="field">
-                  <label htmlFor="sim-event-mode">Tipo de evento</label>
-                  <select
-                    id="sim-event-mode"
-                    className="brand-select"
-                    value={eventMode}
-                    onChange={(e) =>
-                      setEventMode(e.target.value as "WEATHER" | "BLOCKED" | "PARTIAL")
-                    }
-                  >
-                    <option value="WEATHER">WEATHER_OVERRIDE (Lluvia extrema)</option>
-                    <option value="BLOCKED">BLOCKAGE_OVERRIDE (Bloqueo total)</option>
-                    <option value="PARTIAL">BLOCKAGE_OVERRIDE (Paso 1 carril)</option>
-                  </select>
-                </div>
-
                 {eventMode === "WEATHER" ? (
                   <div className="two-col-inline">
-                    <div className="field">
+                    <div className="field field--tight">
                       <label htmlFor="sim-p24">Lluvia 24h (mm)</label>
                       <input
                         id="sim-p24"
@@ -295,7 +360,7 @@ export function SimulatorPanel({
                         onChange={(e) => setPrecip24h(e.target.value)}
                       />
                     </div>
-                    <div className="field">
+                    <div className="field field--tight">
                       <label htmlFor="sim-p72">Lluvia 72h (mm)</label>
                       <input
                         id="sim-p72"
@@ -307,8 +372,8 @@ export function SimulatorPanel({
                     </div>
                   </div>
                 ) : (
-                  <div className="field">
-                    <label htmlFor="sim-radius">Radio de peligro (m)</label>
+                  <div className="field field--tight">
+                    <label htmlFor="sim-radius">Radio de derrumbe (m)</label>
                     <input
                       id="sim-radius"
                       type="text"
@@ -319,15 +384,15 @@ export function SimulatorPanel({
                   </div>
                 )}
 
-                <button type="submit" disabled={!isOnline || busy}>
+                <button type="submit" className="btn btn--block" disabled={!isOnline || busy}>
                   Inyectar evento (rev. {revision + 1})
                 </button>
 
                 {notifications.length > 0 && (
-                  <ul className="ops-card-list" style={{ marginBlockStart: "0.75rem" }}>
+                  <ul className="ops-card-list" style={{ marginBlockStart: "0.65rem" }}>
                     {notifications.map((n, idx) => (
                       <li key={idx} className="ops-list-item">
-                        <strong>[{n.channel}]</strong> {n.preview}
+                        <small>{n.preview}</small>
                       </li>
                     ))}
                   </ul>
@@ -335,73 +400,77 @@ export function SimulatorPanel({
               </form>
 
               <form onSubmit={handleRunEvaluation} className="subform-box">
-                <h3>3. Evaluar Enrutamiento e Impacto (Huánuco → Tingo María)</h3>
-                <div className="field">
-                  <label htmlFor="sim-vehicle">Vehículo evaluado</label>
-                  <select
-                    id="sim-vehicle"
-                    className="brand-select"
-                    value={vehicleCode}
-                    onChange={(e) => setVehicleCode(e.target.value as VehicleCategoryCode)}
-                  >
-                    <option value="PICKUP_4X4">PICKUP_4X4 (Camioneta 4x4)</option>
-                    <option value="AMBULANCE_4X4">AMBULANCE_4X4 (Ambulancia 4x4)</option>
-                    <option value="LIGHT_TRUCK">LIGHT_TRUCK (Camión agrícola)</option>
-                    <option value="HEAVY_TRAILER">HEAVY_TRAILER (Tráiler pesado)</option>
-                    <option value="MOTORCYCLE">MOTORCYCLE (Motocicleta)</option>
-                  </select>
-                </div>
-
-                <div className="field">
-                  <label htmlFor="sim-cargo">Carga</label>
-                  <select
-                    id="sim-cargo"
-                    className="brand-select"
-                    value={cargoType}
-                    onChange={(e) => setCargoType(e.target.value as CargoType)}
-                  >
-                    <option value="PERISHABLE_AGRI">PERISHABLE_AGRI (Agrícola perecible)</option>
-                    <option value="MEDICAL_PATIENT">MEDICAL_PATIENT (Paciente crítico)</option>
-                    <option value="MEDICAL_SUPPLIES">MEDICAL_SUPPLIES (Insumos médicos)</option>
-                  </select>
-                </div>
-
+                <span className="section-eyebrow">2. Evaluar ruta e impacto</span>
                 <div className="two-col-inline">
-                  {cargoType !== "MEDICAL_PATIENT" && (
-                    <div className="field">
-                      <label htmlFor="sim-payload">Carga (kg)</label>
-                      <input
-                        id="sim-payload"
-                        type="text"
-                        inputMode="decimal"
-                        value={payloadKg}
-                        onChange={(e) => setPayloadKg(e.target.value)}
-                      />
-                    </div>
-                  )}
-                  <div className="field">
-                    <label htmlFor="sim-wait">Espera sin mitigación (min)</label>
-                    <input
-                      id="sim-wait"
-                      type="text"
-                      inputMode="numeric"
-                      value={baselineWaitMin}
-                      onChange={(e) => setBaselineWaitMin(e.target.value)}
-                    />
+                  <div className="field field--tight">
+                    <label htmlFor="sim-vehicle">Vehículo</label>
+                    <select
+                      id="sim-vehicle"
+                      className="brand-select"
+                      value={vehicleCode}
+                      onChange={(e) => setVehicleCode(e.target.value as VehicleCategoryCode)}
+                    >
+                      <option value="PICKUP_4X4">Camioneta 4x4</option>
+                      <option value="AMBULANCE_4X4">Ambulancia 4x4</option>
+                      <option value="LIGHT_TRUCK">Camión agrícola</option>
+                      <option value="HEAVY_TRAILER">Tráiler pesado</option>
+                      <option value="MOTORCYCLE">Motocicleta</option>
+                    </select>
+                  </div>
+
+                  <div className="field field--tight">
+                    <label htmlFor="sim-cargo">Carga</label>
+                    <select
+                      id="sim-cargo"
+                      className="brand-select"
+                      value={cargoType}
+                      onChange={(e) => setCargoType(e.target.value as CargoType)}
+                    >
+                      <option value="PERISHABLE_AGRI">Agrícola perecible</option>
+                      <option value="MEDICAL_PATIENT">Paciente crítico</option>
+                      <option value="MEDICAL_SUPPLIES">Insumos médicos</option>
+                    </select>
                   </div>
                 </div>
 
-                <div className="field">
-                  <label htmlFor="sim-eval-time">Reloj de evaluación (UTC ISO-8601)</label>
-                  <input
-                    id="sim-eval-time"
-                    type="text"
-                    value={evalTimeIso}
-                    onChange={(e) => setEvalTimeIso(e.target.value)}
-                  />
-                </div>
+                <details className="disclosure-inline">
+                  <summary>Parámetros avanzados</summary>
+                  <div className="two-col-inline" style={{ marginBlockStart: "0.5rem" }}>
+                    {cargoType !== "MEDICAL_PATIENT" && (
+                      <div className="field field--tight">
+                        <label htmlFor="sim-payload">Carga (kg)</label>
+                        <input
+                          id="sim-payload"
+                          type="text"
+                          inputMode="decimal"
+                          value={payloadKg}
+                          onChange={(e) => setPayloadKg(e.target.value)}
+                        />
+                      </div>
+                    )}
+                    <div className="field field--tight">
+                      <label htmlFor="sim-wait">Espera base (min)</label>
+                      <input
+                        id="sim-wait"
+                        type="text"
+                        inputMode="numeric"
+                        value={baselineWaitMin}
+                        onChange={(e) => setBaselineWaitMin(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="field field--tight">
+                    <label htmlFor="sim-eval-time">Fecha evaluación (UTC)</label>
+                    <input
+                      id="sim-eval-time"
+                      type="text"
+                      value={evalTimeIso}
+                      onChange={(e) => setEvalTimeIso(e.target.value)}
+                    />
+                  </div>
+                </details>
 
-                <button type="submit" className="btn btn--primary" disabled={!isOnline || busy}>
+                <button type="submit" className="btn btn--primary btn--block" disabled={!isOnline || busy}>
                   {busy ? "Calculando..." : "Ejecutar ruta + evaluar impacto"}
                 </button>
               </form>
@@ -410,7 +479,6 @@ export function SimulatorPanel({
 
           {(simRouting || latestImpact) && (
             <div className="impact-cards-wrap" aria-live="polite">
-              <h3>Resultados de Simulación ({simEval?.param_version_tag ?? "impact"})</h3>
               {simRouting && (
                 <div
                   className={`banner ${
@@ -418,14 +486,19 @@ export function SimulatorPanel({
                       ? "banner--danger"
                       : "banner--info"
                   }`}
-                  style={{ marginBlockEnd: "0.75rem" }}
                 >
                   <span>
-                    <strong>Decisión:</strong> {simRouting.resolution_type}
+                    <strong>
+                      {simRouting.resolution_type === "ALTERNATE_ROUTE"
+                        ? "Ruta alterna"
+                        : simRouting.resolution_type === "LOGISTIC_BRIDGE_REQUIRED"
+                          ? "Puente logístico"
+                          : "Sin ruta segura"}
+                    </strong>
                     {simRouting.resolution_type === "ALTERNATE_ROUTE" &&
-                      ` · ${simRouting.total_distance_km.toFixed(1)} km / ${simRouting.estimated_time_min.toFixed(1)} min`}
+                      ` · ${simRouting.total_distance_km.toFixed(1)} km · ${simRouting.estimated_time_min.toFixed(0)} min`}
                     {simRouting.resolution_type === "LOGISTIC_BRIDGE_REQUIRED" &&
-                      ` · ${simRouting.bridge_proposal.transfer_mode} (${simRouting.bridge_proposal.length_m} m)`}
+                      ` · ${simRouting.bridge_proposal.length_m} m`}
                     {simRouting.resolution_type === "NO_SAFE_ROUTE" &&
                       ` (${simRouting.reason_code})`}
                   </span>
@@ -433,60 +506,49 @@ export function SimulatorPanel({
               )}
 
               {latestImpact && (
-                <div className="impact-grid">
-                  <div className="metric-box">
-                    <span className="metric-label">Tiempo (Sin mitig. → Mitigado)</span>
-                    <span className="metric-value">
-                      {latestImpact.baseline.travel_min.toFixed(1)} →{" "}
-                      {latestImpact.mitigated.travel_min !== null
-                        ? `${latestImpact.mitigated.travel_min.toFixed(1)} min`
-                        : "null"}
-                    </span>
-                    <span className="hint" style={{ marginBlockEnd: 0 }}>
-                      Delta:{" "}
-                      {latestImpact.deltas.time_delta_min !== null
-                        ? `${latestImpact.deltas.time_delta_min.toFixed(1)} min (${latestImpact.deltas.time_saved_pct?.toFixed(1)}%)`
-                        : "Sin ruta segura"}
-                    </span>
-                  </div>
-
-                  <div className="metric-box">
-                    <span className="metric-label">CO₂ neto (kg)</span>
-                    <span className="metric-value">
-                      {latestImpact.baseline.co2_kg.toFixed(2)} →{" "}
-                      {latestImpact.mitigated.co2_kg !== null
-                        ? `${latestImpact.mitigated.co2_kg.toFixed(2)} kg`
-                        : "null"}
-                    </span>
-                    <span className="hint" style={{ marginBlockEnd: 0 }}>
-                      Delta CO₂:{" "}
-                      {latestImpact.deltas.net_co2_delta_kg !== null
-                        ? `${latestImpact.deltas.net_co2_delta_kg.toFixed(2)} kg`
-                        : "Sin mitigación"}
-                    </span>
-                  </div>
-
-                  <div className="metric-box">
-                    <span className="metric-label">Merma agrícola (USD)</span>
-                    <span className="metric-value">
-                      ${latestImpact.baseline.cargo_loss_usd.toFixed(2)} →{" "}
-                      {latestImpact.mitigated.cargo_loss_usd !== null
-                        ? `$${latestImpact.mitigated.cargo_loss_usd.toFixed(2)}`
-                        : "null"}
-                    </span>
-                    <span className="hint" style={{ marginBlockEnd: 0 }}>
-                      Ahorro neto:{" "}
-                      {latestImpact.deltas.net_agri_savings_usd !== null
-                        ? `$${latestImpact.deltas.net_agri_savings_usd.toFixed(2)}`
-                        : latestImpact.mitigation_status}
-                    </span>
-                  </div>
+                <div className="panel-stack">
+                  <span className="section-eyebrow">
+                    Comparativa ({simEval?.param_version_tag ?? "impact"})
+                  </span>
+                  <ImpactBar
+                    label="Tiempo de viaje"
+                    baselineValue={latestImpact.baseline.travel_min}
+                    mitigatedValue={latestImpact.mitigated.travel_min}
+                    unit="min"
+                    deltaText={
+                      latestImpact.deltas.time_saved_pct !== null
+                        ? `-${latestImpact.deltas.time_saved_pct.toFixed(1)}%`
+                        : "Sin ruta"
+                    }
+                  />
+                  <ImpactBar
+                    label="Emisión neta CO₂"
+                    baselineValue={latestImpact.baseline.co2_kg}
+                    mitigatedValue={latestImpact.mitigated.co2_kg}
+                    unit="kg"
+                    deltaText={
+                      latestImpact.deltas.net_co2_delta_kg !== null
+                        ? `Delta CO₂: ${latestImpact.deltas.net_co2_delta_kg.toFixed(2)} kg`
+                        : "Sin ruta"
+                    }
+                  />
+                  <ImpactBar
+                    label="Merma agrícola"
+                    baselineValue={latestImpact.baseline.cargo_loss_usd}
+                    mitigatedValue={latestImpact.mitigated.cargo_loss_usd}
+                    unit="USD"
+                    deltaText={
+                      latestImpact.deltas.net_agri_savings_usd !== null
+                        ? `Ahorro neto: $${latestImpact.deltas.net_agri_savings_usd.toFixed(2)}`
+                        : "Sin mitigación"
+                    }
+                  />
                 </div>
               )}
             </div>
           )}
         </div>
       )}
-    </section>
+    </div>
   );
 }

@@ -52,6 +52,39 @@ export interface RegionsListResponse {
   regions: TerritorialUnit[];
 }
 
+export interface RoadNodeItem {
+  node_id: string;
+  name: string;
+  node_type: "HOSPITAL" | "TOWN_CENTER" | "INTERSECTION" | "SAFE_TRANSFER_ZONE" | "TUNNEL_PORTAL" | string;
+  elevation_m: number;
+  lat: number;
+  lon: number;
+}
+
+export interface NodesListResponse {
+  nodes: RoadNodeItem[];
+}
+
+export interface VerifySegmentAttributesResponse {
+  segment_id: string;
+  corridor_name: string;
+  surface_type: string;
+  road_width_m: number;
+  max_supported_tons: number;
+  max_slope_forward_pct: number;
+  max_slope_reverse_pct: number | null;
+  is_historical_hotspot: boolean;
+  geometry_source: string;
+  attributes_verified_at: string;
+}
+
+export interface VerifyCorridorBatchResponse {
+  segments_verified: number;
+  corridor_name: string | null;
+  region: string | null;
+  verified_at: string;
+}
+
 export interface OtpRequestResponse {
   challenge_id: string;
   expires_in_sec: number;
@@ -305,6 +338,23 @@ async function requestJson<T>(
 
 export function fetchRegions(): Promise<RegionsListResponse> {
   return requestJson<RegionsListResponse>("/regions", {
+    method: "GET",
+  });
+}
+
+export function fetchNodes(options?: {
+  region?: string;
+  q?: string;
+  node_type?: string;
+  limit?: number;
+}): Promise<NodesListResponse> {
+  const params = new URLSearchParams();
+  if (options?.region) params.set("region", options.region);
+  if (options?.q) params.set("q", options.q);
+  if (options?.node_type) params.set("node_type", options.node_type);
+  if (typeof options?.limit === "number") params.set("limit", String(options.limit));
+  const qs = params.toString();
+  return requestJson<NodesListResponse>(`/nodes${qs ? `?${qs}` : ""}`, {
     method: "GET",
   });
 }
@@ -565,6 +615,44 @@ export function postSimEvaluate(
 export function fetchSimImpact(scenarioId: string, token: string): Promise<SimImpactResponse> {
   return requestJson<SimImpactResponse>(`/simulator/scenarios/${scenarioId}/impact`, {
     method: "GET",
+    token,
+  });
+}
+
+export function patchSegmentAttributes(
+  segmentId: string,
+  body: {
+    road_width_m?: number;
+    max_supported_tons?: number;
+    max_slope_forward_pct?: number;
+    max_slope_reverse_pct?: number;
+    surface_type?: "PAVED" | "GRAVEL" | "DIRT_TRACK";
+    is_historical_hotspot?: boolean;
+    geometry_source?: "FIELD_SURVEY" | "OFFICIAL" | "OSM_CURATED";
+    notes?: string;
+  },
+  token: string
+): Promise<VerifySegmentAttributesResponse> {
+  return requestJson<VerifySegmentAttributesResponse>(`/segments/${segmentId}/attributes`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+    token,
+  });
+}
+
+export function postVerifyCorridorAttributes(
+  body: {
+    corridor_name?: string;
+    region?: string;
+    only_paved?: boolean;
+    geometry_source?: "FIELD_SURVEY" | "OFFICIAL" | "OSM_CURATED";
+    notes?: string;
+  },
+  token: string
+): Promise<VerifyCorridorBatchResponse> {
+  return requestJson<VerifyCorridorBatchResponse>("/corridors/verify-attributes", {
+    method: "POST",
+    body: JSON.stringify(body),
     token,
   });
 }

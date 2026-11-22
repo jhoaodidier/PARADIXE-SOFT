@@ -2,7 +2,46 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import type { CorridorSegmentFeature } from "../api/client.ts";
+import { attachAnchoredPopoverPosition } from "../utils/topLayer.ts";
+import {
+  IconCheck,
+  IconCrosshair,
+  IconLayers,
+  IconList,
+  IconMap,
+  IconMinus,
+  IconMoon,
+  IconMountain,
+  IconPlus,
+  IconSatellite,
+  IconX,
+} from "./Icons.tsx";
 import { RiskBadge } from "./RiskBadge.tsx";
+
+export type BasemapChoice = "auto" | "standard" | "satellite" | "terrain" | "dark";
+export type ResolvedBasemap = "standard" | "satellite" | "terrain" | "dark";
+
+export interface LayerVisibilityState {
+  corridors: boolean;
+  hospitals: boolean;
+  towns: boolean;
+  districts: boolean;
+}
+
+export interface RouteOverlayData {
+  coordinates: [number, number][];
+  origin?: [number, number] | null;
+  destination?: [number, number] | null;
+  hazard?: { lat: number; lon: number; label: string } | null;
+  label?: string;
+}
+
+export interface FlyToTarget {
+  lon: number;
+  lat: number;
+  zoom?: number;
+  nonce: number;
+}
 
 export interface CorridorMapProps {
   features: CorridorSegmentFeature[];
@@ -10,17 +49,21 @@ export interface CorridorMapProps {
   onSelectSegment: (segmentId: string) => void;
   pmtilesUrl?: string | null;
   focusBounds?: [[number, number], [number, number]] | null;
+  flyToTarget?: FlyToTarget | null;
   resolvedScheme?: "light" | "dark";
   regionLabel?: string;
+  routeOverlay?: RouteOverlayData | null;
+  riskFilter?: string;
+  onChangeRiskFilter?: (risk: string) => void;
 }
 
 const PASSABILITY_LABELS: Record<
   CorridorSegmentFeature["properties"]["passability_state"],
   string
 > = {
-  OPEN: "Abierto",
-  CAUTION_SUSPECTED: "Sospecha reportada",
-  PARTIAL_ONE_LANE: "Paso restringido (1 carril)",
+  OPEN: "Libre",
+  CAUTION_SUSPECTED: "Precaución reportada",
+  PARTIAL_ONE_LANE: "Paso 1 carril",
   BLOCKED: "Bloqueado",
 };
 
@@ -34,22 +77,64 @@ const SURFACE_LABELS: Record<
 };
 
 const RISK_COLORS: Record<CorridorSegmentFeature["properties"]["risk_level"], string> = {
-  GREEN: "#15803d",
-  AMBER: "#d97706",
-  RED: "#dc2626",
-  UNKNOWN: "#64748b",
+  GREEN: "#10b981",
+  AMBER: "#f59e0b",
+  RED: "#ef4444",
+  UNKNOWN: "#94a3b8",
+};
+
+const RISK_NAMES: Record<CorridorSegmentFeature["properties"]["risk_level"], string> = {
+  GREEN: "Libre",
+  AMBER: "Precaución",
+  RED: "Crítico",
+  UNKNOWN: "Sin clima",
 };
 
 const PAGE_SIZE = 25;
 let protocolRegistered = false;
 
-function getBasemapTiles(scheme: "light" | "dark"): string[] {
-  const variant = scheme === "dark" ? "dark_all" : "rastertiles/voyager";
-  return [
-    `https://a.basemaps.cartocdn.com/${variant}/{z}/{x}/{y}.png`,
-    `https://b.basemaps.cartocdn.com/${variant}/{z}/{x}/{y}.png`,
-    `https://c.basemaps.cartocdn.com/${variant}/{z}/{x}/{y}.png`,
-  ];
+function getBasemapTiles(basemap: ResolvedBasemap): {
+  tiles: string[];
+  attribution: string;
+  maxzoom: number;
+} {
+  switch (basemap) {
+    case "satellite":
+      return {
+        tiles: [
+          "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        ],
+        attribution: "© Esri World Imagery",
+        maxzoom: 18,
+      };
+    case "terrain":
+      return {
+        tiles: [
+          "https://a.tile.opentopomap.org/{z}/{x}/{y}.png",
+          "https://b.tile.opentopomap.org/{z}/{x}/{y}.png",
+          "https://c.tile.opentopomap.org/{z}/{x}/{y}.png",
+        ],
+        attribution: "© OpenStreetMap · OpenTopoMap",
+        maxzoom: 17,
+      };
+    case "dark":
+      return {
+        tiles: [
+          "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+        ],
+        attribution: "© Esri Dark Gray Canvas",
+        maxzoom: 16,
+      };
+    case "standard":
+    default:
+      return {
+        tiles: [
+          "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+        ],
+        attribution: "© Esri · OpenStreetMap",
+        maxzoom: 18,
+      };
+  }
 }
 
 export function resolveClientPmtilesUrl(explicitUrl?: string | null): string | null {
@@ -89,27 +174,104 @@ function prefersReducedMotion(): boolean {
   );
 }
 
+function createPopupCard(title: string, subtitle: string, dotColor?: string): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "map-popup-card";
+
+  const headingRow = document.createElement("div");
+  headingRow.className = "map-popup-title-row";
+
+  if (dotColor) {
+    const dot = document.createElement("span");
+    dot.className = "map-popup-dot";
+    dot.style.backgroundColor = dotColor;
+    headingRow.appendChild(dot);
+  }
+
+  const strong = document.createElement("strong");
+  strong.textContent = title;
+  headingRow.appendChild(strong);
+
+  const sub = document.createElement("span");
+  sub.className = "map-popup-sub";
+  sub.textContent = subtitle;
+
+  wrap.appendChild(headingRow);
+  wrap.appendChild(sub);
+  return wrap;
+}
+
 export function CorridorMap({
   features,
   selectedSegmentId,
   onSelectSegment,
   pmtilesUrl,
   focusBounds,
+  flyToTarget,
   resolvedScheme = "light",
-  regionLabel = "Huánuco y Red Territorial",
+  regionLabel = "Huánuco",
+  routeOverlay,
+  riskFilter: controlledRiskFilter,
+  onChangeRiskFilter,
 }: CorridorMapProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<maplibregl.Map | null>(null);
-  const initialSchemeRef = useRef<"light" | "dark">(resolvedScheme);
+  const popupRef = useRef<maplibregl.Popup | null>(null);
+  const layersBtnRef = useRef<HTMLButtonElement | null>(null);
+  const layersPopoverRef = useRef<HTMLDivElement | null>(null);
+  const styleBtnRef = useRef<HTMLButtonElement | null>(null);
+  const stylePopoverRef = useRef<HTMLDivElement | null>(null);
+
   const tableCaptionId = useId();
   const searchInputId = useId();
   const riskSelectId = useId();
+  const layersPopoverId = useId();
+  const stylePopoverId = useId();
+
+  const [basemapChoice, setBasemapChoice] = useState<BasemapChoice>("auto");
+  const resolvedBasemap: ResolvedBasemap =
+    basemapChoice === "auto"
+      ? resolvedScheme === "dark"
+        ? "dark"
+        : "standard"
+      : basemapChoice;
+  const initialBasemapRef = useRef<ResolvedBasemap>(resolvedBasemap);
+
+  const [layersVisible, setLayersVisible] = useState<LayerVisibilityState>({
+    corridors: true,
+    hospitals: true,
+    towns: true,
+    districts: true,
+  });
 
   const [searchTerm, setSearchTerm] = useState("");
-  const [riskFilter, setRiskFilter] = useState<string>("ALL");
+  const [internalRiskFilter, setInternalRiskFilter] = useState<string>("ALL");
+  const riskFilter = controlledRiskFilter ?? internalRiskFilter;
+  const setRiskFilter = (val: string) => {
+    if (controlledRiskFilter === undefined) {
+      setInternalRiskFilter(val);
+    }
+    onChangeRiskFilter?.(val);
+  };
   const [pageIndex, setPageIndex] = useState(0);
+  const [tableOpen, setTableOpen] = useState(false);
 
   const effectivePmtilesUrl = resolveClientPmtilesUrl(pmtilesUrl);
+
+  useEffect(() => {
+    const cleanLayers = attachAnchoredPopoverPosition(
+      layersBtnRef.current,
+      layersPopoverRef.current
+    );
+    const cleanStyle = attachAnchoredPopoverPosition(
+      styleBtnRef.current,
+      stylePopoverRef.current
+    );
+    return () => {
+      cleanLayers();
+      cleanStyle();
+    };
+  }, []);
 
   useEffect(() => {
     const container = mapContainerRef.current;
@@ -121,14 +283,17 @@ export function CorridorMap({
       protocolRegistered = true;
     }
 
-    const scheme = initialSchemeRef.current;
-    const bgColor = scheme === "dark" ? "#0b1120" : "#e2e8f0";
+    const startBasemap = initialBasemapRef.current;
+    const basemapCfg = getBasemapTiles(startBasemap);
+    const bgColor = startBasemap === "dark" ? "#0b1120" : "#e8eef5";
+
     const sources: Record<string, maplibregl.SourceSpecification> = {
-      "basemap-carto": {
+      "basemap-raster": {
         type: "raster",
-        tiles: getBasemapTiles(scheme),
+        tiles: basemapCfg.tiles,
         tileSize: 256,
-        attribution: "© OpenStreetMap · CARTO",
+        maxzoom: basemapCfg.maxzoom,
+        attribution: basemapCfg.attribution,
       },
     };
     if (effectivePmtilesUrl) {
@@ -150,10 +315,8 @@ export function CorridorMap({
         {
           id: "basemap-tiles",
           type: "raster",
-          source: "basemap-carto",
-          paint: {
-            "raster-opacity": 0.92,
-          },
+          source: "basemap-raster",
+          paint: { "raster-opacity": 0.96 },
         },
       ],
     };
@@ -162,11 +325,18 @@ export function CorridorMap({
       container,
       style: baseStyle,
       center: [-76.12, -9.68],
-      zoom: 8.2,
+      zoom: 8.4,
       attributionControl: { compact: true },
     });
 
-    map.addControl(new maplibregl.NavigationControl(), "top-right");
+    if (typeof maplibregl.Popup === "function") {
+      popupRef.current = new maplibregl.Popup({
+        closeButton: false,
+        closeOnClick: false,
+        offset: 12,
+        maxWidth: "260px",
+      });
+    }
 
     map.on("load", () => {
       if (effectivePmtilesUrl) {
@@ -180,8 +350,8 @@ export function CorridorMap({
             "line-join": "round",
           },
           paint: {
-            "line-width": ["interpolate", ["linear"], ["zoom"], 6, 1.5, 10, 3.2],
-            "line-opacity": 0.6,
+            "line-width": ["interpolate", ["linear"], ["zoom"], 6, 1.4, 10, 3.2],
+            "line-opacity": 0.55,
             "line-color": [
               "case",
               ["==", ["get", "passability_state"], "BLOCKED"],
@@ -203,7 +373,7 @@ export function CorridorMap({
           paint: {
             "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 2.5, 10, 5],
             "circle-color": "#0284c7",
-            "circle-stroke-width": 1.25,
+            "circle-stroke-width": 1.5,
             "circle-stroke-color": "#ffffff",
             "circle-opacity": 0.85,
           },
@@ -217,8 +387,8 @@ export function CorridorMap({
           filter: ["==", ["get", "node_type"], "TOWN_CENTER"],
           paint: {
             "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 2, 10, 4.5],
-            "circle-color": "#0f766e",
-            "circle-stroke-width": 1,
+            "circle-color": "#0d9488",
+            "circle-stroke-width": 1.25,
             "circle-stroke-color": "#ffffff",
           },
         });
@@ -230,9 +400,9 @@ export function CorridorMap({
           "source-layer": "nodes",
           filter: ["==", ["get", "node_type"], "HOSPITAL"],
           paint: {
-            "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 3.5, 10, 6.5],
-            "circle-color": "#be123c",
-            "circle-stroke-width": 1.5,
+            "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 4, 10, 7],
+            "circle-color": "#e11d48",
+            "circle-stroke-width": 2,
             "circle-stroke-color": "#ffffff",
           },
         });
@@ -240,24 +410,18 @@ export function CorridorMap({
 
       map.addSource("corridors-geojson", {
         type: "geojson",
-        data: {
-          type: "FeatureCollection",
-          features: [],
-        },
+        data: { type: "FeatureCollection", features: [] },
       });
 
       map.addLayer({
         id: "corridors-casing",
         type: "line",
         source: "corridors-geojson",
-        layout: {
-          "line-cap": "round",
-          "line-join": "round",
-        },
+        layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-width": ["case", ["==", ["get", "passability_state"], "BLOCKED"], 8, 6],
+          "line-width": ["case", ["==", ["get", "passability_state"], "BLOCKED"], 8, 6.2],
           "line-color": "#ffffff",
-          "line-opacity": 0.45,
+          "line-opacity": 0.55,
         },
       });
 
@@ -265,12 +429,9 @@ export function CorridorMap({
         id: "corridors-line",
         type: "line",
         source: "corridors-geojson",
-        layout: {
-          "line-cap": "round",
-          "line-join": "round",
-        },
+        layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-width": ["case", ["==", ["get", "passability_state"], "BLOCKED"], 5.5, 3.8],
+          "line-width": ["case", ["==", ["get", "passability_state"], "BLOCKED"], 5.2, 3.8],
           "line-color": [
             "match",
             ["get", "effective_risk"],
@@ -290,14 +451,11 @@ export function CorridorMap({
         type: "line",
         source: "corridors-geojson",
         filter: ["==", ["get", "segment_id"], ""],
-        layout: {
-          "line-cap": "round",
-          "line-join": "round",
-        },
+        layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-width": 12,
-          "line-color": "#38bdf8",
-          "line-opacity": 0.45,
+          "line-width": 14,
+          "line-color": "#3b82f6",
+          "line-opacity": 0.36,
         },
       });
 
@@ -306,32 +464,146 @@ export function CorridorMap({
         type: "line",
         source: "corridors-geojson",
         filter: ["==", ["get", "segment_id"], ""],
-        layout: {
-          "line-cap": "round",
-          "line-join": "round",
-        },
+        layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-width": 6,
-          "line-color": "#0ea5e9",
-          "line-opacity": 0.98,
+          "line-color": "#2563eb",
+          "line-opacity": 1,
         },
       });
 
-      const handleClick = (event: maplibregl.MapLayerMouseEvent) => {
+      // Active route + simulation overlay sources and layers
+      map.addSource("active-route-source", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+
+      map.addLayer({
+        id: "active-route-casing",
+        type: "line",
+        source: "active-route-source",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-width": 10,
+          "line-color": "#ffffff",
+          "line-opacity": 0.85,
+        },
+      });
+
+      map.addLayer({
+        id: "active-route-line",
+        type: "line",
+        source: "active-route-source",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-width": 5.5,
+          "line-color": "#2563eb",
+        },
+      });
+
+      map.addSource("active-route-points", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+
+      map.addLayer({
+        id: "active-route-pins",
+        type: "circle",
+        source: "active-route-points",
+        paint: {
+          "circle-radius": 8,
+          "circle-color": ["match", ["get", "role"], "origin", "#2563eb", "destination", "#10b981", "#ef4444"],
+          "circle-stroke-width": 3,
+          "circle-stroke-color": "#ffffff",
+        },
+      });
+
+      map.addSource("active-hazard-source", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+
+      map.addLayer({
+        id: "active-hazard-pulse",
+        type: "circle",
+        source: "active-hazard-source",
+        paint: {
+          "circle-radius": 22,
+          "circle-color": "#ef4444",
+          "circle-opacity": 0.22,
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "#ef4444",
+        },
+      });
+
+      const handleClickCorridor = (event: maplibregl.MapLayerMouseEvent) => {
         const clickedId = event.features?.[0]?.properties?.segment_id;
         if (typeof clickedId === "string" && clickedId.length > 0) {
           onSelectSegment(clickedId);
         }
       };
 
-      map.on("click", "corridors-line", handleClick);
+      const setPointer = (cursor: string) => {
+        const canvas = map.getCanvas?.();
+        if (canvas) canvas.style.cursor = cursor;
+      };
+
+      const handleCorridorHover = (event: maplibregl.MapLayerMouseEvent) => {
+        const props = event.features?.[0]?.properties;
+        if (!props) return;
+        setPointer("pointer");
+        if (!popupRef.current) return;
+        const name = String(props.corridor_name ?? "Vía territorial");
+        const lenKm = Number(props.length_km);
+        const surf = SURFACE_LABELS[props.surface_type as keyof typeof SURFACE_LABELS] ?? "Vía";
+        const effRisk = (props.effective_risk ?? props.risk_level ?? "UNKNOWN") as keyof typeof RISK_COLORS;
+        const subtitle = `${Number.isFinite(lenKm) ? `${lenKm.toFixed(1)} km · ` : ""}${surf} · ${RISK_NAMES[effRisk] ?? "Sin clima"}`;
+        popupRef.current
+          .setLngLat(event.lngLat)
+          .setDOMContent(createPopupCard(name, subtitle, RISK_COLORS[effRisk] ?? RISK_COLORS.UNKNOWN))
+          .addTo(map);
+      };
+
+      const handleCorridorLeave = () => {
+        setPointer("");
+        popupRef.current?.remove();
+      };
+
+      const handleNodeHover = (kindLabel: string, color: string) => (event: maplibregl.MapLayerMouseEvent) => {
+        const props = event.features?.[0]?.properties;
+        if (!props) return;
+        setPointer("pointer");
+        if (!popupRef.current) return;
+        const name = String(props.name ?? kindLabel);
+        const elev = props.elevation_m ? ` · ${props.elevation_m} m s.n.m.` : "";
+        popupRef.current
+          .setLngLat(event.lngLat)
+          .setDOMContent(createPopupCard(name, `${kindLabel}${elev}`, color))
+          .addTo(map);
+      };
+
+      map.on("click", "corridors-line", handleClickCorridor);
+      map.on("mousemove", "corridors-line", handleCorridorHover);
+      map.on("mouseleave", "corridors-line", handleCorridorLeave);
+
       if (effectivePmtilesUrl) {
-        map.on("click", "pmtiles-corridors", handleClick);
+        map.on("click", "pmtiles-corridors", handleClickCorridor);
+        map.on("mousemove", "pmtiles-corridors", handleCorridorHover);
+        map.on("mouseleave", "pmtiles-corridors", handleCorridorLeave);
+
+        map.on("mousemove", "pmtiles-nodes-hospitals", handleNodeHover("Hospital / Centro de Salud", "#e11d48"));
+        map.on("mouseleave", "pmtiles-nodes-hospitals", handleCorridorLeave);
+        map.on("mousemove", "pmtiles-nodes-towns", handleNodeHover("Centro poblado", "#0d9488"));
+        map.on("mouseleave", "pmtiles-nodes-towns", handleCorridorLeave);
+        map.on("mousemove", "pmtiles-districts-points", handleNodeHover("Distrito", "#0284c7"));
+        map.on("mouseleave", "pmtiles-districts-points", handleCorridorLeave);
       }
     });
 
     mapInstanceRef.current = map;
     return () => {
+      popupRef.current?.remove();
+      popupRef.current = null;
       map.remove();
       mapInstanceRef.current = null;
     };
@@ -340,30 +612,61 @@ export function CorridorMap({
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
+    const cfg = getBasemapTiles(resolvedBasemap);
     if (typeof map.getLayer === "function" && map.getLayer("background")) {
       map.setPaintProperty?.(
         "background",
         "background-color",
-        resolvedScheme === "dark" ? "#0b1120" : "#e2e8f0"
+        resolvedBasemap === "dark" ? "#0b1120" : "#e8eef5"
       );
     }
-    const basemapSource = map.getSource("basemap-carto") as
+    const basemapSource = map.getSource("basemap-raster") as
       | (maplibregl.RasterTileSource & { setTiles?: (tiles: string[]) => void })
       | undefined;
     if (basemapSource && typeof basemapSource.setTiles === "function") {
-      basemapSource.setTiles(getBasemapTiles(resolvedScheme));
+      basemapSource.setTiles(cfg.tiles);
     }
-  }, [resolvedScheme]);
+  }, [resolvedBasemap]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || typeof map.getLayer !== "function" || typeof map.setLayoutProperty !== "function") {
+      return;
+    }
+    const toggle = (id: string, visible: boolean) => {
+      if (map.getLayer(id)) {
+        map.setLayoutProperty(id, "visibility", visible ? "visible" : "none");
+      }
+    };
+    toggle("corridors-line", layersVisible.corridors);
+    toggle("corridors-casing", layersVisible.corridors);
+    toggle("corridors-selected-halo", layersVisible.corridors);
+    toggle("corridors-selected-line", layersVisible.corridors);
+    toggle("pmtiles-corridors", layersVisible.corridors);
+    toggle("pmtiles-nodes-hospitals", layersVisible.hospitals);
+    toggle("pmtiles-nodes-towns", layersVisible.towns);
+    toggle("pmtiles-districts-points", layersVisible.districts);
+  }, [layersVisible]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map || !focusBounds) return;
     map.fitBounds?.(focusBounds, {
-      padding: 40,
+      padding: { top: 88, right: 64, bottom: 72, left: 410 },
       maxZoom: 12,
-      duration: prefersReducedMotion() ? 0 : 500,
+      duration: prefersReducedMotion() ? 0 : 520,
     });
   }, [focusBounds]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !flyToTarget) return;
+    map.flyTo?.({
+      center: [flyToTarget.lon, flyToTarget.lat],
+      zoom: flyToTarget.zoom ?? 12.2,
+      duration: prefersReducedMotion() ? 0 : 600,
+    });
+  }, [flyToTarget]);
 
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -379,10 +682,7 @@ export function CorridorMap({
       },
     }));
 
-    source.setData({
-      type: "FeatureCollection",
-      features: enriched,
-    });
+    source.setData({ type: "FeatureCollection", features: enriched });
   }, [features]);
 
   useEffect(() => {
@@ -400,6 +700,97 @@ export function CorridorMap({
       map.setFilter?.("corridors-selected-halo", filterExpr);
     }
   }, [selectedSegmentId]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    const routeSrc = map.getSource("active-route-source") as maplibregl.GeoJSONSource | undefined;
+    const ptsSrc = map.getSource("active-route-points") as maplibregl.GeoJSONSource | undefined;
+    const hazardSrc = map.getSource("active-hazard-source") as maplibregl.GeoJSONSource | undefined;
+    if (!routeSrc || !ptsSrc || !hazardSrc) return;
+
+    if (!routeOverlay) {
+      routeSrc.setData({ type: "FeatureCollection", features: [] });
+      ptsSrc.setData({ type: "FeatureCollection", features: [] });
+      hazardSrc.setData({ type: "FeatureCollection", features: [] });
+      return;
+    }
+
+    routeSrc.setData({
+      type: "FeatureCollection",
+      features:
+        routeOverlay.coordinates.length >= 2
+          ? [
+              {
+                type: "Feature",
+                geometry: { type: "LineString", coordinates: routeOverlay.coordinates },
+                properties: { label: routeOverlay.label ?? "Ruta" },
+              },
+            ]
+          : [],
+    });
+
+    const pins: GeoJSON.Feature[] = [];
+    if (routeOverlay.origin) {
+      pins.push({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: routeOverlay.origin },
+        properties: { role: "origin" },
+      });
+    }
+    if (routeOverlay.destination) {
+      pins.push({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: routeOverlay.destination },
+        properties: { role: "destination" },
+      });
+    }
+    ptsSrc.setData({ type: "FeatureCollection", features: pins });
+
+    hazardSrc.setData({
+      type: "FeatureCollection",
+      features: routeOverlay.hazard
+        ? [
+            {
+              type: "Feature",
+              geometry: {
+                type: "Point",
+                coordinates: [routeOverlay.hazard.lon, routeOverlay.hazard.lat],
+              },
+              properties: { label: routeOverlay.hazard.label },
+            },
+          ]
+        : [],
+    });
+
+    const ptsToFit: [number, number][] = [...routeOverlay.coordinates];
+    if (routeOverlay.origin) ptsToFit.push(routeOverlay.origin);
+    if (routeOverlay.destination) ptsToFit.push(routeOverlay.destination);
+    if (routeOverlay.hazard) ptsToFit.push([routeOverlay.hazard.lon, routeOverlay.hazard.lat]);
+    if (ptsToFit.length > 0) {
+      let minLon = Infinity;
+      let minLat = Infinity;
+      let maxLon = -Infinity;
+      let maxLat = -Infinity;
+      for (const [lon, lat] of ptsToFit) {
+        if (lon < minLon) minLon = lon;
+        if (lat < minLat) minLat = lat;
+        if (lon > maxLon) maxLon = lon;
+        if (lat > maxLat) maxLat = lat;
+      }
+      map.fitBounds?.(
+        [
+          [minLon - 0.03, minLat - 0.03],
+          [maxLon + 0.03, maxLat + 0.03],
+        ],
+        {
+          padding: { top: 96, right: 80, bottom: 96, left: 410 },
+          maxZoom: 12.5,
+          duration: prefersReducedMotion() ? 0 : 600,
+        }
+      );
+    }
+  }, [routeOverlay]);
 
   const handleInspectSegment = (feature: CorridorSegmentFeature) => {
     onSelectSegment(feature.properties.segment_id);
@@ -423,12 +814,30 @@ export function CorridorMap({
             [maxLon + 0.015, maxLat + 0.015],
           ],
           {
-            padding: 72,
+            padding: { top: 96, right: 80, bottom: 96, left: 410 },
             maxZoom: 13,
-            duration: prefersReducedMotion() ? 0 : 450,
+            duration: prefersReducedMotion() ? 0 : 480,
           }
         );
       }
+    }
+  };
+
+  const handleRecenter = () => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    if (focusBounds) {
+      map.fitBounds?.(focusBounds, {
+        padding: { top: 88, right: 64, bottom: 72, left: 410 },
+        maxZoom: 12,
+        duration: prefersReducedMotion() ? 0 : 450,
+      });
+    } else {
+      map.flyTo?.({
+        center: [-76.12, -9.68],
+        zoom: 8.4,
+        duration: prefersReducedMotion() ? 0 : 450,
+      });
     }
   };
 
@@ -458,163 +867,324 @@ export function CorridorMap({
   );
 
   return (
-    <section className="map-section" aria-labelledby="map-section-title">
-      <div className="card">
-        <div className="map-card-header">
-          <h2 id="map-section-title" style={{ marginBlockEnd: 0 }}>
-            Mapa Territorial — {regionLabel}
-          </h2>
-          <span className="hint" style={{ marginBlockEnd: 0 }}>
-            Capa base Carto + Vectorial PMTiles v3 + Estado GeoJSON
-          </span>
+    <section
+      className="map-stage"
+      aria-label={`Mapa territorial interactivo — ${regionLabel}`}
+    >
+      <div ref={mapContainerRef} className="map-canvas-host" />
+
+      {/* Bottom-center compact legend + Table sheet trigger */}
+      <div className="map-dock-bottom-center">
+        <div className="map-legend-pill" aria-label="Leyenda del mapa">
+          <span className="legend-dot legend-dot--green">Libre</span>
+          <span className="legend-dot legend-dot--amber">Precaución</span>
+          <span className="legend-dot legend-dot--red">Crítico</span>
+          <span className="legend-dot legend-dot--hospital">Hospital</span>
         </div>
 
-        <div
-          className="map-frame"
-          role="region"
-          aria-label={`Mapa interactivo de resiliencia vial ${regionLabel}`}
+        <button
+          type="button"
+          className="map-dock-pill"
+          aria-expanded={tableOpen}
+          onClick={() => setTableOpen((v) => !v)}
         >
-          <div ref={mapContainerRef} className="map-canvas-host" />
+          <IconList size={16} />
+          <span>Vías ({filteredFeatures.length})</span>
+        </button>
+      </div>
 
-          <div className="map-hud-top" aria-hidden="true">
-            <strong>{regionLabel}</strong>
-            <span>{features.length} tramos en vista</span>
-          </div>
+      {/* Bottom-right Map Controls: Zoom Stack + Capas + Estilo Mapa */}
+      <div className="map-dock-bottom-right" aria-label="Controles del mapa">
+        <div className="map-action-row">
+          <button
+            ref={layersBtnRef}
+            type="button"
+            className="map-dock-pill"
+            {...({ popoverTarget: layersPopoverId } as Record<string, string>)}
+          >
+            <IconLayers size={16} />
+            <span>Capas</span>
+          </button>
 
-          <div className="map-hud-legend" aria-hidden="true">
-            <span className="legend-dot legend-dot--green">Verde</span>
-            <span className="legend-dot legend-dot--amber">Ámbar</span>
-            <span className="legend-dot legend-dot--red">Rojo</span>
-            <span className="legend-dot legend-dot--hospital">Hospitales</span>
-            <span className="legend-dot legend-dot--town">Poblados</span>
-            <span className="legend-dot legend-dot--district">Distritos</span>
-          </div>
+          <button
+            ref={styleBtnRef}
+            type="button"
+            className="map-dock-pill"
+            {...({ popoverTarget: stylePopoverId } as Record<string, string>)}
+          >
+            <IconMap size={16} />
+            <span>Mapa</span>
+          </button>
+        </div>
+
+        <div className="map-zoom-stack" role="group" aria-label="Zoom y enfoque del mapa">
+          <button
+            type="button"
+            className="zoom-btn"
+            aria-label="Acercar mapa"
+            onClick={() =>
+              mapInstanceRef.current?.zoomIn?.({ duration: prefersReducedMotion() ? 0 : 220 })
+            }
+          >
+            <IconPlus size={17} />
+          </button>
+          <button
+            type="button"
+            className="zoom-btn"
+            aria-label="Alejar mapa"
+            onClick={() =>
+              mapInstanceRef.current?.zoomOut?.({ duration: prefersReducedMotion() ? 0 : 220 })
+            }
+          >
+            <IconMinus size={17} />
+          </button>
+          <button
+            type="button"
+            className="zoom-btn"
+            aria-label="Centrar en territorio activo"
+            onClick={handleRecenter}
+          >
+            <IconCrosshair size={16} />
+          </button>
         </div>
       </div>
 
-      <div className="card">
-        <div className="table-filter-bar">
-          <div className="field" style={{ marginBlockEnd: 0, flex: "1 1 220px" }}>
-            <label htmlFor={searchInputId}>Buscar corredor vial</label>
-            <input
-              id={searchInputId}
-              type="search"
-              placeholder="Ej. Carpish, Tingo María, Ambo..."
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setPageIndex(0);
-              }}
-            />
-          </div>
-
-          <div className="field" style={{ marginBlockEnd: 0, flex: "0 1 200px" }}>
-            <label htmlFor={riskSelectId}>Filtrar riesgo IVV</label>
-            <select
-              id={riskSelectId}
-              className="brand-select"
-              value={riskFilter}
-              onChange={(e) => {
-                setRiskFilter(e.target.value);
-                setPageIndex(0);
-              }}
-            >
-              <option value="ALL">Todos ({features.length})</option>
-              <option value="RED">RED (Alto)</option>
-              <option value="AMBER">AMBER (Moderado)</option>
-              <option value="GREEN">GREEN (Bajo)</option>
-              <option value="UNKNOWN">UNKNOWN / STALE</option>
-            </select>
-          </div>
+      {/* Layers Popover (Native Popover API + Fallback Positioning) */}
+      <div
+        ref={layersPopoverRef}
+        id={layersPopoverId}
+        className="map-popover anchored-popover"
+        {...({ popover: "auto" } as Record<string, string>)}
+      >
+        <p className="popover-title">Capas visibles</p>
+        <div className="popover-option-list">
+          {(
+            [
+              ["corridors", "Red vial IVV"],
+              ["hospitals", "Hospitales"],
+              ["towns", "Centros poblados"],
+              ["districts", "Distritos"],
+            ] as const
+          ).map(([key, label]) => {
+            const active = layersVisible[key];
+            return (
+              <button
+                key={key}
+                type="button"
+                className={`popover-choice-btn${active ? " is-active" : ""}`}
+                aria-pressed={active}
+                onClick={() =>
+                  setLayersVisible((prev) => ({ ...prev, [key]: !prev[key] }))
+                }
+              >
+                <span>{label}</span>
+                {active && <IconCheck size={15} />}
+              </button>
+            );
+          })}
         </div>
+      </div>
 
-        <div tabIndex={0} role="region" aria-labelledby={tableCaptionId} className="table-wrapper">
-          <table className="corridor-table">
-            <caption id={tableCaptionId}>
-              Estado geotécnico y transitabilidad por tramo vial ({filteredFeatures.length} tramos)
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col">Corredor</th>
-                <th scope="col">Longitud</th>
-                <th scope="col">Transitabilidad</th>
-                <th scope="col">Riesgo IVV</th>
-                <th scope="col">Acción</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pageFeatures.length === 0 ? (
+      {/* Basemap Style Popover */}
+      <div
+        ref={stylePopoverRef}
+        id={stylePopoverId}
+        className="map-popover anchored-popover"
+        {...({ popover: "auto" } as Record<string, string>)}
+      >
+        <p className="popover-title">Tipo de mapa</p>
+        <div className="style-grid">
+          <button
+            type="button"
+            className={`style-card${resolvedBasemap === "standard" ? " is-active" : ""}`}
+            aria-pressed={resolvedBasemap === "standard"}
+            onClick={() => setBasemapChoice("standard")}
+          >
+            <IconMap size={18} />
+            <span>Estándar</span>
+          </button>
+          <button
+            type="button"
+            className={`style-card${resolvedBasemap === "satellite" ? " is-active" : ""}`}
+            aria-pressed={resolvedBasemap === "satellite"}
+            onClick={() => setBasemapChoice("satellite")}
+          >
+            <IconSatellite size={18} />
+            <span>Satélite</span>
+          </button>
+          <button
+            type="button"
+            className={`style-card${resolvedBasemap === "terrain" ? " is-active" : ""}`}
+            aria-pressed={resolvedBasemap === "terrain"}
+            onClick={() => setBasemapChoice("terrain")}
+          >
+            <IconMountain size={18} />
+            <span>Relieve</span>
+          </button>
+          <button
+            type="button"
+            className={`style-card${resolvedBasemap === "dark" ? " is-active" : ""}`}
+            aria-pressed={resolvedBasemap === "dark"}
+            onClick={() => setBasemapChoice("dark")}
+          >
+            <IconMoon size={18} />
+            <span>Nocturno</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Collapsible Bottom Table Sheet (hidden by default for clean map-first paint) */}
+      {tableOpen && (
+        <div
+          className="table-sheet"
+          role="region"
+          aria-label="Listado detallado de tramos viales"
+        >
+          <div className="table-sheet-header">
+            <div className="table-filter-bar">
+              <div className="field field--compact" style={{ flex: "1 1 200px" }}>
+                <label htmlFor={searchInputId} className="visually-hidden">
+                  Buscar corredor vial
+                </label>
+                <input
+                  id={searchInputId}
+                  type="search"
+                  placeholder="Filtrar vías (Carpish, Central, Ambo...)"
+                  value={searchTerm}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    setPageIndex(0);
+                  }}
+                />
+              </div>
+
+              <div className="field field--compact" style={{ flex: "0 1 175px" }}>
+                <label htmlFor={riskSelectId} className="visually-hidden">
+                  Filtrar estado de riesgo
+                </label>
+                <select
+                  id={riskSelectId}
+                  className="brand-select"
+                  value={riskFilter}
+                  onChange={(e) => {
+                    setRiskFilter(e.target.value);
+                    setPageIndex(0);
+                  }}
+                >
+                  <option value="ALL">Todos ({features.length})</option>
+                  <option value="GREEN">Libre</option>
+                  <option value="AMBER">Precaución</option>
+                  <option value="RED">Crítico</option>
+                  <option value="UNKNOWN">Sin clima vigente</option>
+                </select>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Cerrar tabla de vías"
+              onClick={() => setTableOpen(false)}
+            >
+              <IconX size={18} />
+            </button>
+          </div>
+
+          <div
+            tabIndex={0}
+            role="region"
+            aria-labelledby={tableCaptionId}
+            className="table-wrapper"
+          >
+            <table className="corridor-table">
+              <caption id={tableCaptionId}>
+                Tramos viales — {regionLabel} ({filteredFeatures.length})
+              </caption>
+              <thead>
                 <tr>
-                  <td colSpan={5}>
-                    {features.length === 0
-                      ? "No hay tramos sincronizados en caché local. Conéctese para descargar la red vial verificada."
-                      : "Ningún corredor coincide con el filtro de búsqueda actual."}
-                  </td>
+                  <th scope="col">Corredor</th>
+                  <th scope="col">Distancia</th>
+                  <th scope="col">Estado</th>
+                  <th scope="col">Riesgo</th>
+                  <th scope="col">Mapa</th>
                 </tr>
-              ) : (
-                pageFeatures.map((f) => {
-                  const p = f.properties;
-                  const isSelected = selectedSegmentId === p.segment_id;
-                  return (
-                    <tr key={p.segment_id} className={isSelected ? "is-selected" : undefined}>
-                      <th scope="row">
-                        <strong>{p.corridor_name}</strong>
-                        <div className="hint" style={{ marginBlockEnd: 0 }}>
-                          {SURFACE_LABELS[p.surface_type]} ·{" "}
-                          {p.is_attributes_verified ? "Validado" : "Sin verificación física"}
-                        </div>
-                      </th>
-                      <td>{p.length_km.toFixed(1)} km</td>
-                      <td>{PASSABILITY_LABELS[p.passability_state]}</td>
-                      <td>
-                        <RiskBadge
-                          riskLevel={p.risk_level}
-                          ivvScore={p.ivv_score}
-                          isStale={p.is_stale}
-                        />
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className={isSelected ? "btn btn--primary btn--sm" : "btn btn--sm"}
-                          onClick={() => handleInspectSegment(f)}
-                          aria-pressed={isSelected}
-                        >
-                          {isSelected ? "Seleccionado" : "Inspeccionar"}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {pageFeatures.length === 0 ? (
+                  <tr>
+                    <td colSpan={5}>
+                      {features.length === 0
+                        ? "Sin tramos cargados todavía."
+                        : "Sin resultados para este filtro."}
+                    </td>
+                  </tr>
+                ) : (
+                  pageFeatures.map((f) => {
+                    const p = f.properties;
+                    const isSelected = selectedSegmentId === p.segment_id;
+                    return (
+                      <tr key={p.segment_id} className={isSelected ? "is-selected" : undefined}>
+                        <th scope="row">
+                          <strong>{p.corridor_name}</strong>
+                          <div className="hint" style={{ marginBlockEnd: 0 }}>
+                            {SURFACE_LABELS[p.surface_type]}
+                          </div>
+                        </th>
+                        <td>{p.length_km.toFixed(1)} km</td>
+                        <td>{PASSABILITY_LABELS[p.passability_state]}</td>
+                        <td>
+                          <RiskBadge
+                            riskLevel={p.risk_level}
+                            ivvScore={p.ivv_score}
+                            isStale={p.is_stale}
+                          />
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className={isSelected ? "btn btn--primary btn--sm" : "btn btn--sm"}
+                            onClick={() => {
+                              handleInspectSegment(f);
+                              setTableOpen(false);
+                            }}
+                            aria-pressed={isSelected}
+                          >
+                            {isSelected ? "En vista" : "Ver"}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
 
-        {totalPages > 1 && (
-          <nav className="pagination-bar" aria-label="Paginación de tramos viales">
-            <button
-              type="button"
-              className="btn btn--sm"
-              disabled={safePageIndex === 0}
-              onClick={() => setPageIndex((p) => Math.max(0, p - 1))}
-            >
-              Anterior
-            </button>
-            <span className="hint" style={{ marginBlockEnd: 0 }}>
-              Página {safePageIndex + 1} de {totalPages}
-            </span>
-            <button
-              type="button"
-              className="btn btn--sm"
-              disabled={safePageIndex >= totalPages - 1}
-              onClick={() => setPageIndex((p) => Math.min(totalPages - 1, p + 1))}
-            >
-              Siguiente
-            </button>
-          </nav>
-        )}
-      </div>
+          {totalPages > 1 && (
+            <nav className="pagination-bar" aria-label="Paginación de tramos viales">
+              <button
+                type="button"
+                className="btn btn--sm"
+                disabled={safePageIndex === 0}
+                onClick={() => setPageIndex((p) => Math.max(0, p - 1))}
+              >
+                Anterior
+              </button>
+              <span className="hint" style={{ marginBlockEnd: 0 }}>
+                {safePageIndex + 1} / {totalPages}
+              </span>
+              <button
+                type="button"
+                className="btn btn--sm"
+                disabled={safePageIndex >= totalPages - 1}
+                onClick={() => setPageIndex((p) => Math.min(totalPages - 1, p + 1))}
+              >
+                Siguiente
+              </button>
+            </nav>
+          )}
+        </div>
+      )}
     </section>
   );
 }
