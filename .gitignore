@@ -3,11 +3,11 @@
 **/*.rs.bk
 *.pdb
 
-# Node / TypeScript (PWA apps/web)
-apps/web/node_modules/
-apps/web/dist/
-apps/web/.vite/
-apps/web/coverage/
+# Node / TypeScript (PWA apps/web & Landing apps/landing)
+**/node_modules/
+apps/*/dist/
+apps/*/.vite/
+apps/*/coverage/
 *.tsbuildinfo
 
 # Variables de entorno y secretos

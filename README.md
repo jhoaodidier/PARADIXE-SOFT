@@ -133,9 +133,10 @@ Salida determinista esperada: `"ivv_score": "84.00"`, `"risk_level": "RED"`.
 | :--- | :--- |
 | [`crates/`](./crates) | Cargo Workspace en Rust (`paradixe-domain`, `paradixe-ivv`, `paradixe-consensus`, `paradixe-routing`, `paradixe-impact`, `paradixe-api`, `paradixe-ingestor`, `paradixe-messaging`) |
 | [`apps/web/`](./apps/web) | PWA Offline-First en React + TypeScript + MapLibre GL JS + PMTiles + IndexedDB + SSE |
+| [`apps/landing/`](./apps/landing) | Web promocional independiente estilo Apple para **PARADIXE SOFT by TakumiSoft** (React + TypeScript + CSS Scroll-Driven Animations) |
 | [`openapi/openapi-v1.json`](./openapi/openapi-v1.json) | Contrato OpenAPI 3.1.0 canónico (`/api/v1`, 46 rutas, autenticación Dual JWT/`X-API-Key` y esquemas discriminados) |
 | [`migrations/`](./migrations) | Esquema PostgreSQL 16 + PostGIS 3.4 (`0001`..`0006`: 3NF, `territorial_units`, pronósticos IVV +72h, alertas y API Keys/Webhooks B2B) |
-| [`infra/`](./infra) | Nginx hardening (CSP/COOP/CORP/gzip/rate-limit), plantilla HTTPS TLS 1.3 y observabilidad Prometheus/Grafana |
+| [`infra/`](./infra) | Nginx hardening (CSP/COOP/CORP/gzip/rate-limit), `landing.conf`, plantilla HTTPS TLS 1.3 y observabilidad Prometheus/Grafana |
 | [`docker-compose.yml`](./docker-compose.yml) | Orquestación local de PostGIS 16 y RustFS S3 en Rust (puerto 9000 / consola 9001) |
 | [`docker-compose.prod.yml`](./docker-compose.prod.yml) | Stack productivo completo (`postgres`, `rustfs`, `api`, `messaging`, `weather-worker`, `web`) |
 | [`docker-compose.observability.yml`](./docker-compose.observability.yml) | Overlay de monitoreo Prometheus + alertas y Grafana COER (`/metrics`) |
@@ -220,7 +221,19 @@ cd apps/web && npm install && npm run dev
 ./scripts/verify_full_e2e.sh
 ```
 
-### 7. Despliegue Productivo, Observabilidad y Respaldos PostGIS
+### 7. Web Promocional Independiente (`apps/landing`)
+```bash
+# Levantar sitio promocional estilo editorial aparte de la consola operativa (http://localhost:5174)
+cd apps/landing && npm install && npm run dev
+
+# Build de producción y verificación de pruebas unitarias (Vitest + TypeScript)
+cd apps/landing && npm run typecheck && npm test && npm run build
+
+# Imagen Nginx dedicada para despliegue independiente (infra/docker/Dockerfile.landing)
+docker build -f infra/docker/Dockerfile.landing --build-arg VITE_APP_URL=https://app.paradixe.pe -t paradixe-landing .
+```
+
+### 8. Despliegue Productivo, Observabilidad y Respaldos PostGIS
 ```bash
 # Stack completo + monitoreo Prometheus/Grafana
 docker compose -f docker-compose.prod.yml -f docker-compose.observability.yml config -q
