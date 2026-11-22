@@ -21,6 +21,7 @@ paradixe-impact = { path = "../paradixe-impact" }
 paradixe-ivv = { path = "../paradixe-ivv" }
 paradixe-routing = { path = "../paradixe-routing" }
 rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rust_decimal.workspace = true
 secrecy = "0.10"
 serde.workspace = true
@@ -39,6 +40,7 @@ sqlx = { version = "0.8", default-features = false, features = [
 subtle = "2.6"
 thiserror.workspace = true
 tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
 tower-http = { version = "0.6", features = ["cors", "trace", "limit"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

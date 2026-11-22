@@ -721,6 +721,259 @@ pub async fn get_me(
     }))
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegisterDriverRequest {
+    pub phone_e164: String,
+    pub full_name: String,
+    pub password: String,
+    pub device_id: String,
+}
+
+fn validate_phone_e164(raw: &str) -> Result<String, ApiError> {
+    let phone = raw.trim();
+    if !(8..=20).contains(&phone.len())
+        || !phone.starts_with('+')
+        || !phone[1..].bytes().all(|b| b.is_ascii_digit())
+    {
+        return Err(ApiError::validation(
+            "phone_e164 must follow E.164 format (+country and digits, 8..=20 chars)",
+        ));
+    }
+    Ok(phone.to_string())
+}
+
+pub async fn register_driver(
+    State(state): State<AppState>,
+    ValidatedJson(body): ValidatedJson<RegisterDriverRequest>,
+) -> Result<(StatusCode, Json<AuthTokenResponse>), ApiError> {
+    let phone = validate_phone_e164(&body.phone_e164)?;
+    let full_name = body.full_name.trim().to_string();
+    let device_id = body.device_id.trim().to_string();
+    if full_name.is_empty() || full_name.len() > 120 {
+        return Err(ApiError::validation("full_name must be 1..=120 chars"));
+    }
+    if body.password.len() < 10 || body.password.len() > 128 {
+        return Err(ApiError::validation(
+            "password must be between 10 and 128 characters",
+        ));
+    }
+    if device_id.is_empty() || device_id.len() > 128 {
+        return Err(ApiError::validation("device_id must be 1..=128 chars"));
+    }
+
+    state
+        .rate_limiter
+        .check_and_record(&format!("register:{phone}"), 5, Duration::minutes(15))?;
+
+    let pw = body.password.clone();
+    let pw_hash = tokio::task::spawn_blocking(move || hash_password(&pw))
+        .await
+        .map_err(ApiError::internal)??;
+
+    let mut tx = state.pool.begin().await.map_err(ApiError::from_db)?;
+
+    let role_id: Uuid = sqlx::query_scalar("SELECT role_id FROM roles WHERE code = 'DRIVER'")
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(ApiError::from_db)?;
+
+    let user_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO users (user_id, role_id, phone_e164, full_name, password_hash, reputation_score, is_active)
+         VALUES ($1, $2, $3, $4, $5, 0.50, TRUE)",
+    )
+    .bind(user_id)
+    .bind(role_id)
+    .bind(&phone)
+    .bind(&full_name)
+    .bind(&pw_hash)
+    .execute(&mut *tx)
+    .await
+    .map_err(ApiError::from_db)?;
+
+    let refresh_raw = generate_random_token_hex();
+    let refresh_hash = sha256_hex(&refresh_raw);
+    let token_family_id = Uuid::new_v4();
+    let refresh_expires_at = Utc::now() + Duration::days(state.config.jwt_refresh_ttl_days);
+
+    sqlx::query(
+        "INSERT INTO auth_refresh_tokens (token_family_id, user_id, token_hash, device_id, expires_at)
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(token_family_id)
+    .bind(user_id)
+    .bind(&refresh_hash)
+    .bind(&device_id)
+    .bind(refresh_expires_at)
+    .execute(&mut *tx)
+    .await
+    .map_err(ApiError::from_db)?;
+
+    write_audit_log(
+        &mut tx,
+        Some(user_id),
+        "USER_REGISTERED",
+        "USER",
+        user_id,
+        None,
+        json!({ "role_code": "DRIVER" }),
+    )
+    .await?;
+
+    tx.commit().await.map_err(ApiError::from_db)?;
+
+    let access_token = encode_access_token(
+        user_id,
+        RoleCode::Driver,
+        state.config.jwt_secret.expose_secret().as_bytes(),
+        state.config.jwt_access_ttl_min,
+    )?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(AuthTokenResponse {
+            access_token,
+            refresh_token: refresh_raw,
+            token_type: "Bearer",
+            expires_in_sec: state.config.jwt_access_ttl_min * 60,
+        }),
+    ))
+}
+
+#[derive(Debug, Serialize)]
+pub struct AdminUserDto {
+    pub user_id: Uuid,
+    pub phone_e164: String,
+    pub full_name: String,
+    pub role_code: RoleCode,
+    #[serde(with = "rust_decimal::serde::float")]
+    pub reputation_score: Decimal,
+    pub is_active: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UsersListResponse {
+    pub users: Vec<AdminUserDto>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateAdminUserRequest {
+    pub phone_e164: String,
+    pub full_name: String,
+    pub password: String,
+    pub role_code: RoleCode,
+}
+
+pub async fn list_users(
+    State(state): State<AppState>,
+    auth: AuthUser,
+) -> Result<Json<UsersListResponse>, ApiError> {
+    auth.require_roles(&[RoleCode::CoerAdmin])?;
+
+    let rows = sqlx::query(
+        "SELECT u.user_id, u.phone_e164, u.full_name, r.code AS role_code,
+                u.reputation_score, u.is_active, u.created_at
+         FROM users u
+         JOIN roles r ON r.role_id = u.role_id
+         ORDER BY u.created_at DESC",
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(ApiError::from_db)?;
+
+    let mut users = Vec::with_capacity(rows.len());
+    for row in rows {
+        let role_str: String = row.try_get("role_code").map_err(ApiError::from_db)?;
+        let role_code =
+            RoleCode::parse(&role_str).ok_or_else(|| ApiError::internal("Unsupported role"))?;
+        users.push(AdminUserDto {
+            user_id: row.try_get("user_id").map_err(ApiError::from_db)?,
+            phone_e164: row.try_get("phone_e164").map_err(ApiError::from_db)?,
+            full_name: row.try_get("full_name").map_err(ApiError::from_db)?,
+            role_code,
+            reputation_score: row.try_get("reputation_score").map_err(ApiError::from_db)?,
+            is_active: row.try_get("is_active").map_err(ApiError::from_db)?,
+            created_at: row.try_get("created_at").map_err(ApiError::from_db)?,
+        });
+    }
+
+    Ok(Json(UsersListResponse { users }))
+}
+
+pub async fn create_admin_user(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    ValidatedJson(body): ValidatedJson<CreateAdminUserRequest>,
+) -> Result<(StatusCode, Json<AdminUserDto>), ApiError> {
+    auth.require_roles(&[RoleCode::CoerAdmin])?;
+    let phone = validate_phone_e164(&body.phone_e164)?;
+    let full_name = body.full_name.trim().to_string();
+    if full_name.is_empty() || full_name.len() > 120 {
+        return Err(ApiError::validation("full_name must be 1..=120 chars"));
+    }
+    if body.password.len() < 10 || body.password.len() > 128 {
+        return Err(ApiError::validation(
+            "password must be between 10 and 128 characters",
+        ));
+    }
+
+    let pw = body.password.clone();
+    let pw_hash = tokio::task::spawn_blocking(move || hash_password(&pw))
+        .await
+        .map_err(ApiError::internal)??;
+
+    let mut tx = state.pool.begin().await.map_err(ApiError::from_db)?;
+    let role_id: Uuid = sqlx::query_scalar("SELECT role_id FROM roles WHERE code = $1")
+        .bind(body.role_code.as_str())
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(ApiError::from_db)?;
+
+    let user_id = Uuid::new_v4();
+    let row = sqlx::query(
+        "INSERT INTO users (user_id, role_id, phone_e164, full_name, password_hash, reputation_score, is_active)
+         VALUES ($1, $2, $3, $4, $5, 0.70, TRUE)
+         RETURNING reputation_score, is_active, created_at",
+    )
+    .bind(user_id)
+    .bind(role_id)
+    .bind(&phone)
+    .bind(&full_name)
+    .bind(&pw_hash)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(ApiError::from_db)?;
+
+    write_audit_log(
+        &mut tx,
+        Some(auth.user_id),
+        "ADMIN_USER_CREATED",
+        "USER",
+        user_id,
+        None,
+        json!({ "role_code": body.role_code.as_str() }),
+    )
+    .await?;
+
+    tx.commit().await.map_err(ApiError::from_db)?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(AdminUserDto {
+            user_id,
+            phone_e164: phone,
+            full_name,
+            role_code: body.role_code,
+            reputation_score: row.try_get("reputation_score").map_err(ApiError::from_db)?,
+            is_active: row.try_get("is_active").map_err(ApiError::from_db)?,
+            created_at: row.try_get("created_at").map_err(ApiError::from_db)?,
+        }),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

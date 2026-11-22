@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 
 use axum::{
     body::Bytes,
@@ -31,6 +32,7 @@ use uuid::Uuid;
 use crate::{
     auth::{write_audit_log, AuthUser, RoleCode},
     error::{ApiError, ValidatedJson, ValidatedPath, ValidatedQuery},
+    events::{dispatch_corridor_alerts, publish_operational_event},
     sync::append_sync_change,
     AppState, NotificationChannel, NotificationEvent,
 };
@@ -824,6 +826,18 @@ pub async fn create_field_report(
     .await
     .map_err(ApiError::from_db)?;
 
+    state
+        .metrics
+        .reports_created
+        .fetch_add(1, Ordering::Relaxed);
+    publish_operational_event(
+        &state,
+        "INCIDENT_UPDATED",
+        Some(body.segment_id),
+        None,
+        "Nuevo reporte ciudadano de campo recibido",
+    );
+
     Ok((
         StatusCode::CREATED,
         Json(FieldReportResponse {
@@ -1098,6 +1112,48 @@ pub async fn verify_incident(
     .await?;
 
     tx.commit().await.map_err(ApiError::from_db)?;
+
+    if body.verification_state == VerificationState::Confirmed {
+        state
+            .metrics
+            .incidents_confirmed
+            .fetch_add(1, Ordering::Relaxed);
+        let corridor_name: String =
+            sqlx::query_scalar("SELECT corridor_name FROM road_segments WHERE segment_id = $1")
+                .bind(segment_id)
+                .fetch_optional(&state.pool)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "Corredor regional".to_string());
+
+        let severity = if body.impact_passability == "BLOCKED" {
+            "BLOCKED"
+        } else {
+            "RED"
+        };
+        let estado_label = if body.impact_passability == "BLOCKED" {
+            "BLOQUEADO"
+        } else if body.impact_passability == "PARTIAL_ONE_LANE" {
+            "PASO RESTRINGIDO 1 CARRIL"
+        } else {
+            "PRECAUCION"
+        };
+        dispatch_corridor_alerts(
+            &state,
+            corridor_name.clone(),
+            severity,
+            format!("PARADIXE ALERTA: {corridor_name} -> {estado_label}. Verificado COER/DC."),
+        );
+    }
+
+    publish_operational_event(
+        &state,
+        "INCIDENT_UPDATED",
+        Some(incident_id),
+        None,
+        format!("Incidente {} ({})", state_str, body.impact_passability),
+    );
 
     Ok(Json(IncidentResponse {
         incident_id,

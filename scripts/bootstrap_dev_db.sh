@@ -35,6 +35,10 @@ echo "Applying migrations/0004_simulator_fixture_segment_isolation.sql..."
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0004_simulator_fixture_segment_isolation.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0004_simulator_fixture_segment_isolation.sql
 
+echo "Applying migrations/0005_production_ops_forecasts_and_fleet_alerts.sql..."
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0005_production_ops_forecasts_and_fleet_alerts.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/0005_production_ops_forecasts_and_fleet_alerts.sql
+
 DB_NAME="$(python3 -c 'import os, urllib.parse; u = urllib.parse.urlparse(os.environ["DATABASE_URL"]); print(u.path.lstrip("/") or "paradixe_soft")')"
 SIM_USER="$(python3 -c 'import os, urllib.parse; u = urllib.parse.urlparse(os.environ["SIMULATOR_DATABASE_URL"]); print(u.username or "paradixe_sim_ro")')"
 SIM_PASS="$(python3 -c 'import os, urllib.parse; u = urllib.parse.urlparse(os.environ["SIMULATOR_DATABASE_URL"]); print(urllib.parse.unquote(u.password or ""))')"
@@ -79,7 +83,7 @@ BEGIN
     'transfer_corridors, transfer_corridor_capabilities, ivv_model_versions, ' ||
     'routing_config_versions, impact_parameter_versions, weather_observations, ' ||
     'ivv_assessments, incidents, humanitarian_windows, ' ||
-    'territorial_units, hydrography_waterways, ' ||
+    'territorial_units, hydrography_waterways, corridor_alert_subscriptions, weather_forecasts, ' ||
     'simulation_scenarios, sim_events, simulation_impact_logs TO %I',
     v_user
   );
@@ -100,7 +104,7 @@ IMP_COUNT="$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM impact_parameter_ve
 
 echo "Verified: tables=$TABLE_COUNT roles=$ROLE_COUNT vehicles=$VEH_COUNT sync_seq=$SYNC_SEQ ivv=$IVV_TAG routing=$RTE_TAG impact_active=$IMP_COUNT"
 
-test "$TABLE_COUNT" -eq 29
+test "$TABLE_COUNT" -ge 31
 test "$ROLE_COUNT" -eq 5
 test "$VEH_COUNT" -eq 5
 test "$SYNC_SEQ" -ge 0

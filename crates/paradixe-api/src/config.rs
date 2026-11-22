@@ -15,6 +15,14 @@ pub struct AppConfig {
     pub otp_secret: SecretString,
     pub webhook_secret: SecretString,
     pub telemetry_key_store_dir: PathBuf,
+    pub cors_allowed_origins: Vec<String>,
+    pub messaging_internal_url: Option<String>,
+    pub s3_endpoint: String,
+    pub s3_region: String,
+    pub s3_access_key: String,
+    pub s3_secret_key: SecretString,
+    pub s3_bucket_evidence: String,
+    pub s3_public_evidence_base: String,
 }
 
 impl AppConfig {
@@ -57,6 +65,40 @@ impl AppConfig {
                 .unwrap_or_else(|_| "./telemetry_keys".to_string()),
         );
 
+        let cors_allowed_origins = std::env::var("CORS_ALLOWED_ORIGINS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        let messaging_internal_url = std::env::var("MESSAGING_INTERNAL_URL")
+            .ok()
+            .map(|s| s.trim().trim_end_matches('/').to_string())
+            .filter(|s| !s.is_empty());
+
+        let s3_endpoint = std::env::var("S3_ENDPOINT")
+            .unwrap_or_else(|_| "http://127.0.0.1:9000".to_string())
+            .trim()
+            .trim_end_matches('/')
+            .to_string();
+        let s3_region = std::env::var("S3_REGION").unwrap_or_else(|_| "us-east-1".to_string());
+        let s3_access_key =
+            std::env::var("S3_ACCESS_KEY").unwrap_or_else(|_| "rustfsadmin".to_string());
+        let s3_secret_key = SecretString::from(
+            std::env::var("S3_SECRET_KEY").unwrap_or_else(|_| "rustfsadmin_dev_only".to_string()),
+        );
+        let s3_bucket_evidence = std::env::var("S3_BUCKET_EVIDENCE")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "paradixe-evidence".to_string());
+        let s3_public_evidence_base = std::env::var("S3_PUBLIC_EVIDENCE_BASE")
+            .ok()
+            .map(|s| s.trim().trim_end_matches('/').to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "/evidence".to_string());
+
         Ok(Self {
             api_bind_addr,
             database_url: SecretString::from(database_url),
@@ -67,6 +109,14 @@ impl AppConfig {
             otp_secret: SecretString::from(otp_secret),
             webhook_secret: SecretString::from(webhook_secret),
             telemetry_key_store_dir,
+            cors_allowed_origins,
+            messaging_internal_url,
+            s3_endpoint,
+            s3_region,
+            s3_access_key,
+            s3_secret_key,
+            s3_bucket_evidence,
+            s3_public_evidence_base,
         })
     }
 }

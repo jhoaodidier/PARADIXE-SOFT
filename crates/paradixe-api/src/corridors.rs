@@ -15,6 +15,7 @@ use uuid::Uuid;
 use crate::{
     auth::{write_audit_log, AuthUser, RoleCode},
     error::{ApiError, ValidatedJson, ValidatedPath, ValidatedQuery},
+    events::publish_operational_event,
     sync::append_sync_change,
     AppState,
 };
@@ -971,6 +972,14 @@ pub async fn verify_segment_attributes(
 
     tx.commit().await.map_err(ApiError::from_db)?;
 
+    publish_operational_event(
+        &state,
+        "SEGMENT_VERIFIED",
+        Some(segment_id),
+        None,
+        format!("Atributos fisicos certificados en {corridor_name}"),
+    );
+
     Ok(Json(VerifySegmentAttributesResponse {
         segment_id,
         corridor_name,
@@ -1111,6 +1120,14 @@ pub async fn verify_corridor_batch_attributes(
     .await?;
 
     tx.commit().await.map_err(ApiError::from_db)?;
+
+    publish_operational_event(
+        &state,
+        "SEGMENT_VERIFIED",
+        Some(first_segment_id),
+        region.clone(),
+        format!("Certificacion masiva completada ({segments_verified} tramos)"),
+    );
 
     Ok(Json(VerifyCorridorBatchResponse {
         segments_verified,

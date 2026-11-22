@@ -629,6 +629,405 @@
           "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
+    },
+    "/auth/register": {
+      "post": {
+        "operationId": "registerDriver",
+        "summary": "Registra un nuevo conductor con rol DRIVER y emite tokens",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RegisterDriverRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Conductor registrado",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthTokenResponse" }
+              }
+            }
+          },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "422": { "$ref": "#/components/responses/ValidationError" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "operationId": "getAuthMe",
+        "summary": "Obtiene perfil y rol del usuario autenticado",
+        "responses": {
+          "200": {
+            "description": "Perfil autenticado",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthMeResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/admin/users": {
+      "get": {
+        "operationId": "listAdminUsers",
+        "summary": "Lista cuentas operativas del sistema (COER_ADMIN)",
+        "responses": {
+          "200": {
+            "description": "Listado de usuarios",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UsersListResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      },
+      "post": {
+        "operationId": "createAdminUser",
+        "summary": "Crea operador institucional o conductor (COER_ADMIN)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateAdminUserRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Usuario creado",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AdminUserDto" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/regions": {
+      "get": {
+        "operationId": "listRegions",
+        "summary": "Lista unidades territoriales habilitadas (departamentos, provincias y distritos)",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Unidades territoriales",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object", "properties": { "regions": { "type": "array", "items": { "type": "object", "additionalProperties": true } } } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/nodes": {
+      "get": {
+        "operationId": "listRoadNodes",
+        "summary": "Lista nodos viales deduplicados por tipo o nombre",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Nodos encontrados",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object", "properties": { "nodes": { "type": "array", "items": { "type": "object", "additionalProperties": true } } } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/segments/{segment_id}/attributes": {
+      "patch": {
+        "operationId": "verifySegmentAttributes",
+        "summary": "Certifica atributos fisicos de un tramo vial",
+        "parameters": [
+          {
+            "name": "segment_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "additionalProperties": true }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Tramo certificado" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/corridors/verify-attributes": {
+      "post": {
+        "operationId": "verifyCorridorBatchAttributes",
+        "summary": "Certifica por lote la red troncal regional o corredor (COER_ADMIN)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "additionalProperties": true }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Lote certificado" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/corridors/forecast": {
+      "get": {
+        "operationId": "getCorridorForecast",
+        "summary": "Pronostico consultivo IVV a 24h, 48h y 72h por corredor",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Pronostico por horizonte",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CorridorForecastResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analytics/summary": {
+      "get": {
+        "operationId": "getAnalyticsSummary",
+        "summary": "Indicadores ejecutivos territoriales agregados",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Resumen ejecutivo",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AnalyticsSummaryResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/events/stream": {
+      "get": {
+        "operationId": "streamOperationalEvents",
+        "summary": "Stream Server-Sent Events de incidentes, verificaciones y puentes",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Flujo SSE text/event-stream"
+          }
+        }
+      }
+    },
+    "/uploads/presign": {
+      "post": {
+        "operationId": "presignEvidenceUpload",
+        "summary": "Genera URL SigV4 presignada para carga directa de evidencia a S3/RustFS",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/PresignUploadRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "URL presignada generada",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PresignUploadResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/uploads/evidence": {
+      "post": {
+        "operationId": "uploadEvidenceImage",
+        "summary": "Sube imagen JPEG/PNG/WebP validada por firma binaria hacia RustFS",
+        "responses": {
+          "201": {
+            "description": "Evidencia almacenada",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/EvidenceUploadResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/subscriptions": {
+      "get": {
+        "operationId": "listAlertSubscriptions",
+        "summary": "Lista suscripciones activas de alertas por corredor del usuario",
+        "responses": {
+          "200": {
+            "description": "Suscripciones",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SubscriptionsListResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "post": {
+        "operationId": "createAlertSubscription",
+        "summary": "Crea alerta automatica por WhatsApp/SMS para corredor o region",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateSubscriptionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Suscripcion creada",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SubscriptionDto" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/subscriptions/{subscription_id}": {
+      "delete": {
+        "operationId": "deleteAlertSubscription",
+        "summary": "Elimina suscripcion de alerta de flota",
+        "parameters": [
+          {
+            "name": "subscription_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "204": { "description": "Eliminada" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/incidents": {
+      "get": {
+        "operationId": "listIncidents",
+        "summary": "Lista incidentes viales registrados",
+        "security": [],
+        "responses": {
+          "200": { "description": "Lista de incidentes" }
+        }
+      }
+    },
+    "/operations/bridges": {
+      "get": {
+        "operationId": "listBridgesOperations",
+        "summary": "Lista corredores de transbordo, puentes logisticos, ventanas y categorias vehiculares",
+        "security": [],
+        "responses": {
+          "200": { "description": "Catalogo operativo de transbordo" }
+        }
+      }
+    },
+    "/transfer-corridors": {
+      "post": {
+        "operationId": "createTransferCorridor",
+        "summary": "Registra e inspecciona un corredor seguro de transbordo multimodal",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateTransferCorridorRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Corredor de transbordo registrado",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TransferCorridorSummaryDto" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/transfer-corridors/{corridor_id}/inspect": {
+      "patch": {
+        "operationId": "inspectTransferCorridor",
+        "summary": "Revalida la inspeccion tecnica de seguridad de un corredor de transbordo",
+        "parameters": [
+          {
+            "name": "corridor_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/InspectTransferCorridorRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Inspeccion actualizada",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TransferCorridorSummaryDto" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
     }
   },
   "components": {
@@ -1153,7 +1552,32 @@
           "warnings": {
             "type": "array",
             "items": { "type": "string" }
+          },
+          "economic_impact": {
+            "oneOf": [
+              { "$ref": "#/components/schemas/RouteEconomicImpact" },
+              { "type": "null" }
+            ]
           }
+        }
+      },
+      "RouteEconomicImpact": {
+        "type": "object",
+        "required": [
+          "estimated_co2_kg",
+          "baseline_blockage_co2_kg",
+          "co2_delta_kg",
+          "estimated_cargo_loss_avoided_usd",
+          "time_saved_vs_blockage_min",
+          "reference_blockage_hours"
+        ],
+        "properties": {
+          "estimated_co2_kg": { "type": "number" },
+          "baseline_blockage_co2_kg": { "type": "number" },
+          "co2_delta_kg": { "type": "number" },
+          "estimated_cargo_loss_avoided_usd": { "type": "number" },
+          "time_saved_vs_blockage_min": { "type": "number" },
+          "reference_blockage_hours": { "type": "number" }
         }
       },
       "BridgeProposal": {
@@ -1499,6 +1923,187 @@
             "type": "array",
             "items": { "$ref": "#/components/schemas/SimulationImpactEvaluationItem" }
           }
+        }
+      },
+      "RegisterDriverRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["phone_e164", "full_name", "password", "device_id"],
+        "properties": {
+          "phone_e164": { "type": "string", "minLength": 8, "maxLength": 20 },
+          "full_name": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "password": { "type": "string", "minLength": 10, "maxLength": 128 },
+          "device_id": { "type": "string", "minLength": 1, "maxLength": 128 }
+        }
+      },
+      "AuthMeResponse": {
+        "type": "object",
+        "required": ["user_id", "phone_e164", "full_name", "role_code", "reputation_score"],
+        "properties": {
+          "user_id": { "type": "string", "format": "uuid" },
+          "phone_e164": { "type": "string" },
+          "full_name": { "type": "string" },
+          "role_code": { "type": "string" },
+          "reputation_score": { "type": "number" }
+        }
+      },
+      "AdminUserDto": {
+        "type": "object",
+        "required": ["user_id", "phone_e164", "full_name", "role_code", "reputation_score", "is_active", "created_at"],
+        "properties": {
+          "user_id": { "type": "string", "format": "uuid" },
+          "phone_e164": { "type": "string" },
+          "full_name": { "type": "string" },
+          "role_code": { "type": "string" },
+          "reputation_score": { "type": "number" },
+          "is_active": { "type": "boolean" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "UsersListResponse": {
+        "type": "object",
+        "required": ["users"],
+        "properties": {
+          "users": { "type": "array", "items": { "$ref": "#/components/schemas/AdminUserDto" } }
+        }
+      },
+      "CreateAdminUserRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["phone_e164", "full_name", "password", "role_code"],
+        "properties": {
+          "phone_e164": { "type": "string" },
+          "full_name": { "type": "string" },
+          "password": { "type": "string" },
+          "role_code": { "type": "string" }
+        }
+      },
+      "CorridorForecastResponse": {
+        "type": "object",
+        "required": ["horizon_hours", "advisory_only", "summary", "items"],
+        "properties": {
+          "region": { "type": ["string", "null"] },
+          "horizon_hours": { "type": "integer" },
+          "advisory_only": { "type": "boolean" },
+          "generated_at": { "type": ["string", "null"], "format": "date-time" },
+          "summary": { "type": "object", "additionalProperties": true },
+          "items": { "type": "array", "items": { "type": "object", "additionalProperties": true } }
+        }
+      },
+      "AnalyticsSummaryResponse": {
+        "type": "object",
+        "required": ["generated_at", "total_segments", "certified_segments", "certified_pct"],
+        "properties": {
+          "region": { "type": ["string", "null"] },
+          "generated_at": { "type": "string", "format": "date-time" },
+          "total_segments": { "type": "integer" },
+          "certified_segments": { "type": "integer" },
+          "certified_pct": { "type": "number" }
+        }
+      },
+      "PresignUploadRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["content_type", "size_bytes"],
+        "properties": {
+          "content_type": { "type": "string" },
+          "size_bytes": { "type": "integer", "minimum": 1, "maximum": 2097152 }
+        }
+      },
+      "PresignUploadResponse": {
+        "type": "object",
+        "required": ["object_key", "presigned_put_url", "photo_uri", "expires_in_secs"],
+        "properties": {
+          "object_key": { "type": "string" },
+          "presigned_put_url": { "type": "string" },
+          "photo_uri": { "type": "string" },
+          "expires_in_secs": { "type": "integer" }
+        }
+      },
+      "EvidenceUploadResponse": {
+        "type": "object",
+        "required": ["object_key", "photo_uri", "content_type", "size_bytes"],
+        "properties": {
+          "object_key": { "type": "string" },
+          "photo_uri": { "type": "string" },
+          "content_type": { "type": "string" },
+          "size_bytes": { "type": "integer" }
+        }
+      },
+      "CreateSubscriptionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label", "min_risk_level", "channel"],
+        "properties": {
+          "label": { "type": "string" },
+          "region_iso": { "type": ["string", "null"] },
+          "corridor_name": { "type": ["string", "null"] },
+          "min_risk_level": { "type": "string", "enum": ["AMBER", "RED", "BLOCKED"] },
+          "channel": { "type": "string", "enum": ["WHATSAPP_BOT", "SMS"] }
+        }
+      },
+      "SubscriptionDto": {
+        "type": "object",
+        "required": ["subscription_id", "label", "min_risk_level", "channel", "is_active", "created_at"],
+        "properties": {
+          "subscription_id": { "type": "string", "format": "uuid" },
+          "label": { "type": "string" },
+          "region_iso": { "type": ["string", "null"] },
+          "corridor_name": { "type": ["string", "null"] },
+          "min_risk_level": { "type": "string" },
+          "channel": { "type": "string" },
+          "is_active": { "type": "boolean" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "SubscriptionsListResponse": {
+        "type": "object",
+        "required": ["subscriptions"],
+        "properties": {
+          "subscriptions": { "type": "array", "items": { "$ref": "#/components/schemas/SubscriptionDto" } }
+        }
+      },
+      "CreateTransferCorridorRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["side_a_node_id", "side_b_node_id", "length_m", "max_slope_pct", "transfer_mode", "max_safe_ivv", "capabilities"],
+        "properties": {
+          "side_a_node_id": { "type": "string", "format": "uuid" },
+          "side_b_node_id": { "type": "string", "format": "uuid" },
+          "length_m": { "type": "integer", "minimum": 1 },
+          "max_slope_pct": { "type": "number", "minimum": 0 },
+          "transfer_mode": { "type": "string", "enum": ["PEDESTRIAN_SAFE_PATH", "SHUTTLE_RELAY"] },
+          "max_safe_ivv": { "type": "number", "minimum": 0, "maximum": 100 },
+          "inspection_valid_days": { "type": ["integer", "null"] },
+          "capabilities": { "type": "array", "items": { "type": "object", "additionalProperties": true } }
+        }
+      },
+      "InspectTransferCorridorRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["is_verified_safe"],
+        "properties": {
+          "is_verified_safe": { "type": "boolean" },
+          "inspection_valid_days": { "type": ["integer", "null"] },
+          "notes": { "type": ["string", "null"] }
+        }
+      },
+      "TransferCorridorSummaryDto": {
+        "type": "object",
+        "required": ["corridor_id", "side_a_node_id", "side_b_node_id", "length_m", "max_slope_pct", "transfer_mode", "max_safe_ivv", "is_verified_safe", "last_inspected_at", "inspection_valid_days", "requires_revalidation", "cargo_types"],
+        "properties": {
+          "corridor_id": { "type": "string", "format": "uuid" },
+          "side_a_node_id": { "type": "string", "format": "uuid" },
+          "side_b_node_id": { "type": "string", "format": "uuid" },
+          "length_m": { "type": "integer" },
+          "max_slope_pct": { "type": "number" },
+          "transfer_mode": { "type": "string" },
+          "max_safe_ivv": { "type": "number" },
+          "is_verified_safe": { "type": "boolean" },
+          "last_inspected_at": { "type": "string", "format": "date-time" },
+          "inspection_valid_days": { "type": "integer" },
+          "requires_revalidation": { "type": "boolean" },
+          "cargo_types": { "type": "array", "items": { "$ref": "#/components/schemas/CargoType" } }
         }
       }
     }

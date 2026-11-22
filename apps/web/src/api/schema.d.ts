@@ -378,6 +378,314 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Registra un nuevo conductor con rol DRIVER y emite tokens */
+        post: operations["registerDriver"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Obtiene perfil y rol del usuario autenticado */
+        get: operations["getAuthMe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista cuentas operativas del sistema (COER_ADMIN) */
+        get: operations["listAdminUsers"];
+        put?: never;
+        /** Crea operador institucional o conductor (COER_ADMIN) */
+        post: operations["createAdminUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/regions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista unidades territoriales habilitadas (departamentos, provincias y distritos) */
+        get: operations["listRegions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista nodos viales deduplicados por tipo o nombre */
+        get: operations["listRoadNodes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/segments/{segment_id}/attributes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Certifica atributos fisicos de un tramo vial */
+        patch: operations["verifySegmentAttributes"];
+        trace?: never;
+    };
+    "/corridors/verify-attributes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Certifica por lote la red troncal regional o corredor (COER_ADMIN) */
+        post: operations["verifyCorridorBatchAttributes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/corridors/forecast": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Pronostico consultivo IVV a 24h, 48h y 72h por corredor */
+        get: operations["getCorridorForecast"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analytics/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Indicadores ejecutivos territoriales agregados */
+        get: operations["getAnalyticsSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/events/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Stream Server-Sent Events de incidentes, verificaciones y puentes */
+        get: operations["streamOperationalEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/uploads/presign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Genera URL SigV4 presignada para carga directa de evidencia a S3/RustFS */
+        post: operations["presignEvidenceUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/uploads/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sube imagen JPEG/PNG/WebP validada por firma binaria hacia RustFS */
+        post: operations["uploadEvidenceImage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subscriptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista suscripciones activas de alertas por corredor del usuario */
+        get: operations["listAlertSubscriptions"];
+        put?: never;
+        /** Crea alerta automatica por WhatsApp/SMS para corredor o region */
+        post: operations["createAlertSubscription"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/subscriptions/{subscription_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Elimina suscripcion de alerta de flota */
+        delete: operations["deleteAlertSubscription"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/incidents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista incidentes viales registrados */
+        get: operations["listIncidents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/operations/bridges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista corredores de transbordo, puentes logisticos, ventanas y categorias vehiculares */
+        get: operations["listBridgesOperations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/transfer-corridors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Registra e inspecciona un corredor seguro de transbordo multimodal */
+        post: operations["createTransferCorridor"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/transfer-corridors/{corridor_id}/inspect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Revalida la inspeccion tecnica de seguridad de un corredor de transbordo */
+        patch: operations["inspectTransferCorridor"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -653,6 +961,15 @@ export interface components {
             /** @constant */
             operational_authorization: "REQUIRED";
             warnings: string[];
+            economic_impact?: components["schemas"]["RouteEconomicImpact"] | null;
+        };
+        RouteEconomicImpact: {
+            estimated_co2_kg: number;
+            baseline_blockage_co2_kg: number;
+            co2_delta_kg: number;
+            estimated_cargo_loss_avoided_usd: number;
+            time_saved_vs_blockage_min: number;
+            reference_blockage_hours: number;
         };
         BridgeProposal: {
             /** Format: uuid */
@@ -878,6 +1195,139 @@ export interface components {
             /** Format: uuid */
             scenario_id: string;
             evaluations: components["schemas"]["SimulationImpactEvaluationItem"][];
+        };
+        RegisterDriverRequest: {
+            phone_e164: string;
+            full_name: string;
+            password: string;
+            device_id: string;
+        };
+        AuthMeResponse: {
+            /** Format: uuid */
+            user_id: string;
+            phone_e164: string;
+            full_name: string;
+            role_code: string;
+            reputation_score: number;
+        };
+        AdminUserDto: {
+            /** Format: uuid */
+            user_id: string;
+            phone_e164: string;
+            full_name: string;
+            role_code: string;
+            reputation_score: number;
+            is_active: boolean;
+            /** Format: date-time */
+            created_at: string;
+        };
+        UsersListResponse: {
+            users: components["schemas"]["AdminUserDto"][];
+        };
+        CreateAdminUserRequest: {
+            phone_e164: string;
+            full_name: string;
+            password: string;
+            role_code: string;
+        };
+        CorridorForecastResponse: {
+            region?: string | null;
+            horizon_hours: number;
+            advisory_only: boolean;
+            /** Format: date-time */
+            generated_at?: string | null;
+            summary: {
+                [key: string]: unknown;
+            };
+            items: {
+                [key: string]: unknown;
+            }[];
+        };
+        AnalyticsSummaryResponse: {
+            region?: string | null;
+            /** Format: date-time */
+            generated_at: string;
+            total_segments: number;
+            certified_segments: number;
+            certified_pct: number;
+        };
+        PresignUploadRequest: {
+            content_type: string;
+            size_bytes: number;
+        };
+        PresignUploadResponse: {
+            object_key: string;
+            presigned_put_url: string;
+            photo_uri: string;
+            expires_in_secs: number;
+        };
+        EvidenceUploadResponse: {
+            object_key: string;
+            photo_uri: string;
+            content_type: string;
+            size_bytes: number;
+        };
+        CreateSubscriptionRequest: {
+            label: string;
+            region_iso?: string | null;
+            corridor_name?: string | null;
+            /** @enum {string} */
+            min_risk_level: "AMBER" | "RED" | "BLOCKED";
+            /** @enum {string} */
+            channel: "WHATSAPP_BOT" | "SMS";
+        };
+        SubscriptionDto: {
+            /** Format: uuid */
+            subscription_id: string;
+            label: string;
+            region_iso?: string | null;
+            corridor_name?: string | null;
+            min_risk_level: string;
+            channel: string;
+            is_active: boolean;
+            /** Format: date-time */
+            created_at: string;
+        };
+        SubscriptionsListResponse: {
+            subscriptions: components["schemas"]["SubscriptionDto"][];
+        };
+        CreateTransferCorridorRequest: {
+            /** Format: uuid */
+            side_a_node_id: string;
+            /** Format: uuid */
+            side_b_node_id: string;
+            length_m: number;
+            max_slope_pct: number;
+            /** @enum {string} */
+            transfer_mode: "PEDESTRIAN_SAFE_PATH" | "SHUTTLE_RELAY";
+            max_safe_ivv: number;
+            inspection_valid_days?: number | null;
+            capabilities: {
+                [key: string]: unknown;
+            }[];
+        };
+        InspectTransferCorridorRequest: {
+            is_verified_safe: boolean;
+            inspection_valid_days?: number | null;
+            notes?: string | null;
+        };
+        TransferCorridorSummaryDto: {
+            /** Format: uuid */
+            corridor_id: string;
+            /** Format: uuid */
+            side_a_node_id: string;
+            /** Format: uuid */
+            side_b_node_id: string;
+            length_m: number;
+            max_slope_pct: number;
+            transfer_mode: string;
+            max_safe_ivv: number;
+            is_verified_safe: boolean;
+            /** Format: date-time */
+            last_inspected_at: string;
+            inspection_valid_days: number;
+            requires_revalidation: boolean;
+            cargo_types: components["schemas"]["CargoType"][];
         };
     };
     responses: {
@@ -1509,6 +1959,471 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    registerDriver: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterDriverRequest"];
+            };
+        };
+        responses: {
+            /** @description Conductor registrado */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthTokenResponse"];
+                };
+            };
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getAuthMe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Perfil autenticado */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthMeResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listAdminUsers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Listado de usuarios */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsersListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createAdminUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAdminUserRequest"];
+            };
+        };
+        responses: {
+            /** @description Usuario creado */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserDto"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    listRegions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Unidades territoriales */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        regions?: {
+                            [key: string]: unknown;
+                        }[];
+                    };
+                };
+            };
+        };
+    };
+    listRoadNodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Nodos encontrados */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        nodes?: {
+                            [key: string]: unknown;
+                        }[];
+                    };
+                };
+            };
+        };
+    };
+    verifySegmentAttributes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                segment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Tramo certificado */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    verifyCorridorBatchAttributes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Lote certificado */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getCorridorForecast: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pronostico por horizonte */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CorridorForecastResponse"];
+                };
+            };
+        };
+    };
+    getAnalyticsSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resumen ejecutivo */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalyticsSummaryResponse"];
+                };
+            };
+        };
+    };
+    streamOperationalEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Flujo SSE text/event-stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    presignEvidenceUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PresignUploadRequest"];
+            };
+        };
+        responses: {
+            /** @description URL presignada generada */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresignUploadResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    uploadEvidenceImage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Evidencia almacenada */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceUploadResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    listAlertSubscriptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Suscripciones */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionsListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createAlertSubscription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSubscriptionRequest"];
+            };
+        };
+        responses: {
+            /** @description Suscripcion creada */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubscriptionDto"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    deleteAlertSubscription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Eliminada */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listIncidents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Lista de incidentes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listBridgesOperations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Catalogo operativo de transbordo */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    createTransferCorridor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTransferCorridorRequest"];
+            };
+        };
+        responses: {
+            /** @description Corredor de transbordo registrado */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransferCorridorSummaryDto"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["ValidationError"];
+        };
+    };
+    inspectTransferCorridor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                corridor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InspectTransferCorridorRequest"];
+            };
+        };
+        responses: {
+            /** @description Inspeccion actualizada */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransferCorridorSummaryDto"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
 }

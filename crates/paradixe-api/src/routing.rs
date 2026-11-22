@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::Ordering;
 
 use axum::{extract::State, http::StatusCode, Json};
 use chrono::{DateTime, Duration, Utc};
@@ -8,6 +9,7 @@ use paradixe_domain::{
     CargoType, Direction, DirectionType, NoSafeRouteReasonCode, PassabilityState, RouteHop,
     RoutingResolution, SurfaceType, TransferMode, VehicleCategoryCode,
 };
+use paradixe_impact::{evaluate_impact, ImpactInput, ImpactParameters};
 use paradixe_ivv::evaluate_ivv_freshness;
 use paradixe_routing::{
     calculate_route, HumanitarianWindowSpec, NodeSpec, RoutingConfig, RoutingInput, RoutingRequest,
@@ -22,6 +24,7 @@ use uuid::Uuid;
 use crate::{
     auth::{write_audit_log, AuthUser, RoleCode},
     error::{ApiError, ValidatedJson, ValidatedPath},
+    events::{dispatch_corridor_alerts, publish_operational_event},
     sync::append_sync_change,
     AppState,
 };
@@ -51,6 +54,16 @@ pub struct BridgeProposalDto {
     pub estimated_transfer_time_min: Decimal,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct RouteEconomicImpactDto {
+    pub estimated_co2_kg: f64,
+    pub baseline_blockage_co2_kg: f64,
+    pub co2_delta_kg: f64,
+    pub estimated_cargo_loss_avoided_usd: f64,
+    pub time_saved_vs_blockage_min: f64,
+    pub reference_blockage_hours: f64,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(tag = "resolution_type", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RoutingCalculateResponseDto {
@@ -66,6 +79,8 @@ pub enum RoutingCalculateResponseDto {
         eta_quality: String,
         operational_authorization: String,
         warnings: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        economic_impact: Option<RouteEconomicImpactDto>,
     },
     LogisticBridgeRequired {
         blocking_incident_id: Uuid,
@@ -100,6 +115,7 @@ impl From<RoutingResolution> for RoutingCalculateResponseDto {
                 eta_quality,
                 operational_authorization,
                 warnings,
+                economic_impact: None,
             },
             RoutingResolution::LogisticBridgeRequired {
                 blocking_incident_id,
@@ -248,33 +264,64 @@ pub async fn load_active_routing_config(pool: &PgPool) -> Result<RoutingConfig, 
     })
 }
 
-pub async fn calculate_route_handler(
-    State(state): State<AppState>,
-    _auth: AuthUser,
-    ValidatedJson(body): ValidatedJson<RoutingCalculateRequest>,
-) -> Result<Json<RoutingCalculateResponseDto>, ApiError> {
-    validate_cargo_request(body.cargo_type, body.cargo_payload_kg, body.patient_count)?;
+fn decimal_to_f64(d: Decimal) -> f64 {
+    d.to_string().parse::<f64>().unwrap_or(0.0)
+}
 
-    let evaluation_time = Utc::now();
-    let vehicle = load_vehicle_spec(&state.pool, body.vehicle_category_code).await?;
-    let config = load_active_routing_config(&state.pool).await?;
+async fn load_endpoint_bbox(
+    pool: &PgPool,
+    origin_node_id: Uuid,
+    destination_node_id: Uuid,
+) -> Result<Option<(f64, f64, f64, f64)>, ApiError> {
+    let rows = sqlx::query(
+        "SELECT ST_X(location_geom) AS lon, ST_Y(location_geom) AS lat
+         FROM road_nodes
+         WHERE node_id IN ($1, $2)",
+    )
+    .bind(origin_node_id)
+    .bind(destination_node_id)
+    .fetch_all(pool)
+    .await
+    .map_err(ApiError::from_db)?;
 
-    let node_rows = sqlx::query("SELECT node_id, is_geotechnically_stable FROM road_nodes")
-        .fetch_all(&state.pool)
-        .await
-        .map_err(ApiError::from_db)?;
+    if rows.is_empty() {
+        return Ok(None);
+    }
 
-    let nodes: Vec<NodeSpec> = node_rows
-        .into_iter()
-        .map(|r| {
-            Ok(NodeSpec {
-                node_id: r.try_get("node_id").map_err(ApiError::from_db)?,
-                is_geotechnically_stable: r
-                    .try_get("is_geotechnically_stable")
-                    .map_err(ApiError::from_db)?,
-            })
-        })
-        .collect::<Result<Vec<_>, ApiError>>()?;
+    let mut min_lon = f64::INFINITY;
+    let mut min_lat = f64::INFINITY;
+    let mut max_lon = f64::NEG_INFINITY;
+    let mut max_lat = f64::NEG_INFINITY;
+    for r in rows {
+        let lon: f64 = r.try_get("lon").map_err(ApiError::from_db)?;
+        let lat: f64 = r.try_get("lat").map_err(ApiError::from_db)?;
+        min_lon = min_lon.min(lon);
+        min_lat = min_lat.min(lat);
+        max_lon = max_lon.max(lon);
+        max_lat = max_lat.max(lat);
+    }
+    Ok(Some((min_lon, min_lat, max_lon, max_lat)))
+}
+
+async fn load_pruned_graph_for_routing(
+    pool: &PgPool,
+    bbox: Option<(f64, f64, f64, f64)>,
+    margin_deg: f64,
+    origin_node_id: Uuid,
+    destination_node_id: Uuid,
+    extra_node_ids: &[Uuid],
+    evaluation_time: DateTime<Utc>,
+) -> Result<(Vec<NodeSpec>, Vec<SegmentSpec>), ApiError> {
+    let (has_bbox, min_lon, min_lat, max_lon, max_lat) = match bbox {
+        Some((x0, y0, x1, y1)) => (
+            true,
+            (x0 - margin_deg).max(-180.0),
+            (y0 - margin_deg).max(-90.0),
+            (x1 + margin_deg).min(180.0),
+            (y1 + margin_deg).min(90.0),
+        ),
+        None => (false, 0.0, 0.0, 0.0, 0.0),
+    };
 
     let seg_rows = sqlx::query(
         "SELECT
@@ -310,14 +357,34 @@ pub async fn calculate_route_handler(
             WHERE wo.segment_id = rs.segment_id
             ORDER BY wo.observed_at DESC, ia.calculated_at DESC
             LIMIT 1
-         ) latest_ivv ON TRUE",
+         ) latest_ivv ON TRUE
+         WHERE NOT $1 OR rs.geom && ST_MakeEnvelope($2, $3, $4, $5, 4326)",
     )
-    .fetch_all(&state.pool)
+    .bind(has_bbox)
+    .bind(min_lon)
+    .bind(min_lat)
+    .bind(max_lon)
+    .bind(max_lat)
+    .fetch_all(pool)
     .await
     .map_err(ApiError::from_db)?;
 
+    let mut needed_nodes: HashSet<Uuid> = HashSet::with_capacity(seg_rows.len() * 2 + 4);
+    needed_nodes.insert(origin_node_id);
+    needed_nodes.insert(destination_node_id);
+    for id in extra_node_ids {
+        needed_nodes.insert(*id);
+    }
+
     let mut segments = Vec::with_capacity(seg_rows.len());
     for r in seg_rows {
+        let orig_id: Uuid = r.try_get("origin_node_id").map_err(ApiError::from_db)?;
+        let dest_id: Uuid = r
+            .try_get("destination_node_id")
+            .map_err(ApiError::from_db)?;
+        needed_nodes.insert(orig_id);
+        needed_nodes.insert(dest_id);
+
         let dir_str: String = r.try_get("direction_type").map_err(ApiError::from_db)?;
         let direction_type = match dir_str.as_str() {
             "ONE_WAY" => DirectionType::OneWay,
@@ -365,10 +432,8 @@ pub async fn calculate_route_handler(
 
         segments.push(SegmentSpec {
             segment_id: r.try_get("segment_id").map_err(ApiError::from_db)?,
-            origin_node_id: r.try_get("origin_node_id").map_err(ApiError::from_db)?,
-            destination_node_id: r
-                .try_get("destination_node_id")
-                .map_err(ApiError::from_db)?,
+            origin_node_id: orig_id,
+            destination_node_id: dest_id,
             direction_type,
             length_km: r.try_get("length_km").map_err(ApiError::from_db)?,
             max_slope_forward_pct: r
@@ -395,6 +460,111 @@ pub async fn calculate_route_handler(
             ivv_is_stale,
         });
     }
+
+    let node_ids: Vec<Uuid> = needed_nodes.into_iter().collect();
+    let node_rows = sqlx::query(
+        "SELECT node_id, is_geotechnically_stable
+         FROM road_nodes
+         WHERE node_id = ANY($1::uuid[])",
+    )
+    .bind(&node_ids)
+    .fetch_all(pool)
+    .await
+    .map_err(ApiError::from_db)?;
+
+    let nodes: Vec<NodeSpec> = node_rows
+        .into_iter()
+        .map(|r| {
+            Ok(NodeSpec {
+                node_id: r.try_get("node_id").map_err(ApiError::from_db)?,
+                is_geotechnically_stable: r
+                    .try_get("is_geotechnically_stable")
+                    .map_err(ApiError::from_db)?,
+            })
+        })
+        .collect::<Result<Vec<_>, ApiError>>()?;
+
+    Ok((nodes, segments))
+}
+
+async fn compute_route_economic_impact(
+    pool: &PgPool,
+    vehicle_code: VehicleCategoryCode,
+    cargo_type: CargoType,
+    resolution: &RoutingResolution,
+) -> Option<RouteEconomicImpactDto> {
+    let RoutingResolution::AlternateRoute {
+        total_distance_km,
+        estimated_time_min,
+        ..
+    } = resolution
+    else {
+        return None;
+    };
+
+    let row = sqlx::query(
+        "SELECT ipv.version_tag, ipv.co2_idle_kg_per_hour, ipv.co2_drive_kg_per_km,
+                ipv.agri_cargo_value_usd, ipv.perishability_loss_rate_per_hour,
+                ipv.transfer_handling_loss_pct, ipv.spoilage_grace_hours
+         FROM impact_parameter_versions ipv
+         JOIN vehicle_categories vc ON vc.category_id = ipv.vehicle_category_id
+         WHERE vc.code = $1 AND ipv.is_active = TRUE
+         LIMIT 1",
+    )
+    .bind(vehicle_code_str(vehicle_code))
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()?;
+
+    let params = ImpactParameters {
+        version_tag: row.try_get("version_tag").ok()?,
+        co2_idle_kg_per_hour: row.try_get("co2_idle_kg_per_hour").ok()?,
+        co2_drive_kg_per_km: row.try_get("co2_drive_kg_per_km").ok()?,
+        agri_cargo_value_usd: row.try_get("agri_cargo_value_usd").ok()?,
+        perishability_loss_rate_per_hour: row.try_get("perishability_loss_rate_per_hour").ok()?,
+        transfer_handling_loss_pct: row.try_get("transfer_handling_loss_pct").ok()?,
+        spoilage_grace_hours: row.try_get("spoilage_grace_hours").ok()?,
+    };
+
+    // Baseline comparison models a standard 4h blockage wait on the primary trunk.
+    let wait_min = Decimal::from(240);
+    let impact = evaluate_impact(&ImpactInput {
+        params,
+        cargo_type,
+        baseline_normal_travel_min: *estimated_time_min,
+        baseline_wait_min: wait_min,
+        baseline_distance_km: *total_distance_km,
+        resolution: resolution.clone(),
+        bridge_leg_total_distance_km: None,
+        bridge_leg_total_travel_min: None,
+        mitigated_idle_min: None,
+    })
+    .ok()?;
+
+    Some(RouteEconomicImpactDto {
+        estimated_co2_kg: decimal_to_f64(impact.mitigated.co2_kg?),
+        baseline_blockage_co2_kg: decimal_to_f64(impact.baseline.co2_kg),
+        co2_delta_kg: decimal_to_f64(impact.deltas.net_co2_delta_kg?),
+        estimated_cargo_loss_avoided_usd: decimal_to_f64(impact.deltas.net_agri_savings_usd?),
+        time_saved_vs_blockage_min: decimal_to_f64(impact.deltas.time_delta_min?),
+        reference_blockage_hours: 4.0,
+    })
+}
+
+pub async fn calculate_route_handler(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    ValidatedJson(body): ValidatedJson<RoutingCalculateRequest>,
+) -> Result<Json<RoutingCalculateResponseDto>, ApiError> {
+    validate_cargo_request(body.cargo_type, body.cargo_payload_kg, body.patient_count)?;
+
+    let evaluation_time = Utc::now();
+    let vehicle = load_vehicle_spec(&state.pool, body.vehicle_category_code).await?;
+    let config = load_active_routing_config(&state.pool).await?;
+
+    let endpoint_bbox =
+        load_endpoint_bbox(&state.pool, body.origin_node_id, body.destination_node_id).await?;
 
     let win_rows = sqlx::query(
         "SELECT i.segment_id, vc.code AS vehicle_code, hw.direction, hw.starts_at, hw.ends_at
@@ -495,9 +665,15 @@ pub async fn calculate_route_handler(
             });
     }
 
+    let mut corridor_node_ids = Vec::new();
     let mut transfer_corridors = Vec::with_capacity(corr_rows.len());
     for r in corr_rows {
         let corridor_id: Uuid = r.try_get("corridor_id").map_err(ApiError::from_db)?;
+        let side_a: Uuid = r.try_get("side_a_node_id").map_err(ApiError::from_db)?;
+        let side_b: Uuid = r.try_get("side_b_node_id").map_err(ApiError::from_db)?;
+        corridor_node_ids.push(side_a);
+        corridor_node_ids.push(side_b);
+
         let mode_str: String = r.try_get("transfer_mode").map_err(ApiError::from_db)?;
         let transfer_mode = match mode_str.as_str() {
             "PEDESTRIAN_SAFE_PATH" => TransferMode::PedestrianSafePath,
@@ -523,8 +699,8 @@ pub async fn calculate_route_handler(
 
         transfer_corridors.push(TransferCorridorSpec {
             corridor_id,
-            side_a_node_id: r.try_get("side_a_node_id").map_err(ApiError::from_db)?,
-            side_b_node_id: r.try_get("side_b_node_id").map_err(ApiError::from_db)?,
+            side_a_node_id: side_a,
+            side_b_node_id: side_b,
             length_m: u32::try_from(length_m).unwrap_or(0),
             transfer_mode,
             max_safe_ivv: r.try_get("max_safe_ivv").map_err(ApiError::from_db)?,
@@ -543,25 +719,105 @@ pub async fn calculate_route_handler(
         });
     }
 
-    let resolution = calculate_route(&RoutingInput {
-        vehicle,
+    let request = RoutingRequest {
+        origin_node_id: body.origin_node_id,
+        destination_node_id: body.destination_node_id,
+        vehicle_category_code: body.vehicle_category_code,
+        cargo_type: body.cargo_type,
+        cargo_payload_kg: body.cargo_payload_kg,
+        patient_count: body.patient_count,
+    };
+
+    let (nodes, segments) = load_pruned_graph_for_routing(
+        &state.pool,
+        endpoint_bbox,
+        0.40,
+        body.origin_node_id,
+        body.destination_node_id,
+        &corridor_node_ids,
+        evaluation_time,
+    )
+    .await?;
+
+    let mut resolution = calculate_route(&RoutingInput {
+        vehicle: vehicle.clone(),
         nodes,
         segments,
-        transfer_corridors,
-        humanitarian_windows,
-        config,
-        request: RoutingRequest {
-            origin_node_id: body.origin_node_id,
-            destination_node_id: body.destination_node_id,
-            vehicle_category_code: body.vehicle_category_code,
-            cargo_type: body.cargo_type,
-            cargo_payload_kg: body.cargo_payload_kg,
-            patient_count: body.patient_count,
-        },
+        transfer_corridors: transfer_corridors.clone(),
+        humanitarian_windows: humanitarian_windows.clone(),
+        config: config.clone(),
+        request: request.clone(),
         evaluation_time,
     });
 
-    Ok(Json(RoutingCalculateResponseDto::from(resolution)))
+    if matches!(
+        resolution,
+        RoutingResolution::NoSafeRoute {
+            reason_code: NoSafeRouteReasonCode::NetworkDisconnected
+                | NoSafeRouteReasonCode::NoVerifiedTransferCorridor,
+            ..
+        }
+    ) && endpoint_bbox.is_some()
+    {
+        let (wide_nodes, wide_segments) = load_pruned_graph_for_routing(
+            &state.pool,
+            endpoint_bbox,
+            1.60,
+            body.origin_node_id,
+            body.destination_node_id,
+            &corridor_node_ids,
+            evaluation_time,
+        )
+        .await?;
+        resolution = calculate_route(&RoutingInput {
+            vehicle,
+            nodes: wide_nodes,
+            segments: wide_segments,
+            transfer_corridors,
+            humanitarian_windows,
+            config,
+            request,
+            evaluation_time,
+        });
+    }
+
+    state.metrics.routing_total.fetch_add(1, Ordering::Relaxed);
+    match &resolution {
+        RoutingResolution::AlternateRoute { .. } => {
+            state
+                .metrics
+                .routing_alternate
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        RoutingResolution::LogisticBridgeRequired { .. } => {
+            state.metrics.routing_bridge.fetch_add(1, Ordering::Relaxed);
+        }
+        RoutingResolution::NoSafeRoute { .. } => {
+            state
+                .metrics
+                .routing_no_safe
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    let econ_impact = compute_route_economic_impact(
+        &state.pool,
+        body.vehicle_category_code,
+        body.cargo_type,
+        &resolution,
+    )
+    .await;
+
+    let mut dto = RoutingCalculateResponseDto::from(resolution);
+    if let RoutingCalculateResponseDto::AlternateRoute {
+        ref mut economic_impact,
+        ..
+    } = dto
+    {
+        *economic_impact = econ_impact;
+    }
+
+    Ok(Json(dto))
 }
 
 #[derive(Debug, Deserialize)]
@@ -726,6 +982,14 @@ pub async fn propose_logistic_bridge(
 
     tx.commit().await.map_err(ApiError::from_db)?;
 
+    publish_operational_event(
+        &state,
+        "BRIDGE_UPDATED",
+        Some(bridge_id),
+        None,
+        format!("Puente logistico propuesto ({cargo_str})"),
+    );
+
     Ok((
         StatusCode::CREATED,
         Json(LogisticBridgeResponse {
@@ -821,6 +1085,22 @@ pub async fn update_bridge_status(
     .await?;
 
     tx.commit().await.map_err(ApiError::from_db)?;
+
+    publish_operational_event(
+        &state,
+        "BRIDGE_UPDATED",
+        Some(bridge_id),
+        None,
+        format!("Estado de puente logistico actualizado a {}", body.status),
+    );
+    if body.status == "ACTIVE" {
+        dispatch_corridor_alerts(
+            &state,
+            "Puente Logistico".to_string(),
+            "RED",
+            format!("PARADIXE: Puente logistico activo ({cargo_str}) para transbordo habilitado."),
+        );
+    }
 
     Ok(Json(LogisticBridgeResponse {
         bridge_id,
@@ -946,6 +1226,23 @@ pub async fn create_humanitarian_window(
     .await?;
 
     tx.commit().await.map_err(ApiError::from_db)?;
+
+    publish_operational_event(
+        &state,
+        "BRIDGE_UPDATED",
+        Some(window_id),
+        None,
+        format!("Ventana humanitaria {status} ({dir_str})"),
+    );
+    dispatch_corridor_alerts(
+        &state,
+        "Ventana Humanitaria".to_string(),
+        "AMBER",
+        format!(
+            "PARADIXE: Ventana humanitaria {status} ({dir_str}) vigente hasta {}",
+            body.ends_at.format("%H:%M UTC")
+        ),
+    );
 
     Ok((
         StatusCode::CREATED,
@@ -1148,5 +1445,326 @@ pub async fn list_bridges_and_windows(
         bridges,
         humanitarian_windows,
         vehicle_categories,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TransferCapabilityInput {
+    pub cargo_type: CargoType,
+    pub max_payload_kg: Decimal,
+    pub requires_medical_supervision: bool,
+    pub estimated_transfer_time_min: Decimal,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateTransferCorridorRequest {
+    pub side_a_node_id: Uuid,
+    pub side_b_node_id: Uuid,
+    pub length_m: i32,
+    pub max_slope_pct: Decimal,
+    pub transfer_mode: TransferMode,
+    pub max_safe_ivv: Decimal,
+    pub inspection_valid_days: Option<i16>,
+    pub capabilities: Vec<TransferCapabilityInput>,
+}
+
+fn transfer_mode_str(mode: TransferMode) -> &'static str {
+    match mode {
+        TransferMode::PedestrianSafePath => "PEDESTRIAN_SAFE_PATH",
+        TransferMode::ShuttleRelay => "SHUTTLE_RELAY",
+    }
+}
+
+pub async fn create_transfer_corridor(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    ValidatedJson(body): ValidatedJson<CreateTransferCorridorRequest>,
+) -> Result<(StatusCode, Json<TransferCorridorSummaryDto>), ApiError> {
+    auth.require_roles(&[RoleCode::CoerAdmin, RoleCode::CivilDefense])?;
+
+    if body.side_a_node_id == body.side_b_node_id {
+        return Err(ApiError::validation(
+            "side_a_node_id and side_b_node_id must differ",
+        ));
+    }
+    if body.length_m <= 0 {
+        return Err(ApiError::validation("length_m must be > 0"));
+    }
+    if body.max_slope_pct < Decimal::ZERO {
+        return Err(ApiError::validation("max_slope_pct must be >= 0"));
+    }
+    if body.max_safe_ivv < Decimal::ZERO || body.max_safe_ivv > Decimal::from(100) {
+        return Err(ApiError::validation("max_safe_ivv must be in 0..=100"));
+    }
+    let valid_days = body.inspection_valid_days.unwrap_or(30);
+    if !(1..=90).contains(&valid_days) {
+        return Err(ApiError::validation("inspection_valid_days must be 1..=90"));
+    }
+    if body.capabilities.is_empty() {
+        return Err(ApiError::validation(
+            "At least one cargo capability must be specified",
+        ));
+    }
+    for cap in &body.capabilities {
+        if cap.max_payload_kg <= Decimal::ZERO || cap.estimated_transfer_time_min <= Decimal::ZERO {
+            return Err(ApiError::validation(
+                "max_payload_kg and estimated_transfer_time_min must be > 0",
+            ));
+        }
+    }
+
+    let now = Utc::now();
+    let mode_str = transfer_mode_str(body.transfer_mode);
+    let corridor_id = Uuid::new_v4();
+    let mut tx = state.pool.begin().await.map_err(ApiError::from_db)?;
+
+    let nodes_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM road_nodes WHERE node_id IN ($1, $2)")
+            .bind(body.side_a_node_id)
+            .bind(body.side_b_node_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(ApiError::from_db)?;
+    if nodes_count != 2 {
+        return Err(ApiError::validation(
+            "Both side_a_node_id and side_b_node_id must exist in road_nodes",
+        ));
+    }
+
+    sqlx::query(
+        "INSERT INTO transfer_corridors (
+            corridor_id, side_a_node_id, side_b_node_id, path_geom, length_m, max_slope_pct,
+            transfer_mode, max_safe_ivv, is_verified_safe, last_inspected_at,
+            inspection_valid_days, requires_revalidation, verified_by_user_id
+         )
+         SELECT
+            $1, a.node_id, b.node_id,
+            ST_MakeLine(a.location_geom, b.location_geom),
+            $4, $5, $6, $7, TRUE, $8, $9, FALSE, $10
+         FROM road_nodes a, road_nodes b
+         WHERE a.node_id = $2 AND b.node_id = $3",
+    )
+    .bind(corridor_id)
+    .bind(body.side_a_node_id)
+    .bind(body.side_b_node_id)
+    .bind(body.length_m)
+    .bind(body.max_slope_pct)
+    .bind(mode_str)
+    .bind(body.max_safe_ivv)
+    .bind(now)
+    .bind(valid_days)
+    .bind(auth.user_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(ApiError::from_db)?;
+
+    let mut cargo_types = Vec::with_capacity(body.capabilities.len());
+    for cap in &body.capabilities {
+        let ctype = cargo_type_str(cap.cargo_type);
+        sqlx::query(
+            "INSERT INTO transfer_corridor_capabilities (
+                corridor_id, cargo_type, max_payload_kg, requires_medical_supervision, estimated_transfer_time_min
+             ) VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (corridor_id, cargo_type) DO UPDATE SET
+                max_payload_kg = EXCLUDED.max_payload_kg,
+                requires_medical_supervision = EXCLUDED.requires_medical_supervision,
+                estimated_transfer_time_min = EXCLUDED.estimated_transfer_time_min",
+        )
+        .bind(corridor_id)
+        .bind(ctype)
+        .bind(cap.max_payload_kg)
+        .bind(cap.requires_medical_supervision)
+        .bind(cap.estimated_transfer_time_min)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::from_db)?;
+        cargo_types.push(ctype.to_string());
+    }
+
+    append_sync_change(
+        &mut tx,
+        "TRANSFER_CORRIDOR",
+        corridor_id,
+        "UPSERT",
+        Some(json!({
+            "corridor_id": corridor_id,
+            "side_a_node_id": body.side_a_node_id,
+            "side_b_node_id": body.side_b_node_id,
+            "transfer_mode": mode_str,
+            "is_verified_safe": true,
+            "last_inspected_at": now,
+        })),
+    )
+    .await?;
+
+    write_audit_log(
+        &mut tx,
+        Some(auth.user_id),
+        "TRANSFER_CORRIDOR_CREATED",
+        "TRANSFER_CORRIDOR",
+        corridor_id,
+        None,
+        json!({
+            "transfer_mode": mode_str,
+            "length_m": body.length_m,
+            "cargo_types": cargo_types,
+        }),
+    )
+    .await?;
+
+    tx.commit().await.map_err(ApiError::from_db)?;
+
+    publish_operational_event(
+        &state,
+        "BRIDGE_UPDATED",
+        Some(corridor_id),
+        None,
+        format!("Corredor de transbordo certificado ({mode_str})"),
+    );
+
+    Ok((
+        StatusCode::CREATED,
+        Json(TransferCorridorSummaryDto {
+            corridor_id,
+            side_a_node_id: body.side_a_node_id,
+            side_b_node_id: body.side_b_node_id,
+            length_m: body.length_m,
+            max_slope_pct: body.max_slope_pct,
+            transfer_mode: mode_str.to_string(),
+            max_safe_ivv: body.max_safe_ivv,
+            is_verified_safe: true,
+            last_inspected_at: now,
+            inspection_valid_days: valid_days,
+            requires_revalidation: false,
+            cargo_types,
+        }),
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InspectTransferCorridorRequest {
+    pub is_verified_safe: bool,
+    pub inspection_valid_days: Option<i16>,
+    pub notes: Option<String>,
+}
+
+pub async fn inspect_transfer_corridor(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    ValidatedPath(corridor_id): ValidatedPath<Uuid>,
+    ValidatedJson(body): ValidatedJson<InspectTransferCorridorRequest>,
+) -> Result<Json<TransferCorridorSummaryDto>, ApiError> {
+    auth.require_roles(&[RoleCode::CoerAdmin, RoleCode::CivilDefense])?;
+
+    if let Some(days) = body.inspection_valid_days {
+        if !(1..=90).contains(&days) {
+            return Err(ApiError::validation("inspection_valid_days must be 1..=90"));
+        }
+    }
+
+    let now = Utc::now();
+    let mut tx = state.pool.begin().await.map_err(ApiError::from_db)?;
+
+    let row = sqlx::query(
+        "UPDATE transfer_corridors
+         SET is_verified_safe = $2,
+             inspection_valid_days = COALESCE($3, inspection_valid_days),
+             requires_revalidation = FALSE,
+             last_inspected_at = $4,
+             verified_by_user_id = $5
+         WHERE corridor_id = $1
+         RETURNING side_a_node_id, side_b_node_id, length_m, max_slope_pct, transfer_mode,
+                   max_safe_ivv, is_verified_safe, last_inspected_at, inspection_valid_days, requires_revalidation",
+    )
+    .bind(corridor_id)
+    .bind(body.is_verified_safe)
+    .bind(body.inspection_valid_days)
+    .bind(now)
+    .bind(auth.user_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(ApiError::from_db)?
+    .ok_or_else(|| ApiError::not_found("Transfer corridor not found"))?;
+
+    let cap_rows = sqlx::query(
+        "SELECT cargo_type FROM transfer_corridor_capabilities WHERE corridor_id = $1 ORDER BY cargo_type ASC",
+    )
+    .bind(corridor_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(ApiError::from_db)?;
+    let mut cargo_types = Vec::with_capacity(cap_rows.len());
+    for cr in cap_rows {
+        cargo_types.push(cr.try_get("cargo_type").map_err(ApiError::from_db)?);
+    }
+
+    append_sync_change(
+        &mut tx,
+        "TRANSFER_CORRIDOR",
+        corridor_id,
+        "UPSERT",
+        Some(json!({
+            "corridor_id": corridor_id,
+            "is_verified_safe": body.is_verified_safe,
+            "requires_revalidation": false,
+            "last_inspected_at": now,
+        })),
+    )
+    .await?;
+
+    write_audit_log(
+        &mut tx,
+        Some(auth.user_id),
+        "TRANSFER_CORRIDOR_INSPECTED",
+        "TRANSFER_CORRIDOR",
+        corridor_id,
+        None,
+        json!({
+            "is_verified_safe": body.is_verified_safe,
+            "inspection_valid_days": body.inspection_valid_days,
+            "notes": body.notes,
+        }),
+    )
+    .await?;
+
+    tx.commit().await.map_err(ApiError::from_db)?;
+
+    publish_operational_event(
+        &state,
+        "BRIDGE_UPDATED",
+        Some(corridor_id),
+        None,
+        format!(
+            "Inspeccion de corredor de transbordo ({})",
+            if body.is_verified_safe {
+                "APROBADO"
+            } else {
+                "OBSERVADO"
+            }
+        ),
+    );
+
+    Ok(Json(TransferCorridorSummaryDto {
+        corridor_id,
+        side_a_node_id: row.try_get("side_a_node_id").map_err(ApiError::from_db)?,
+        side_b_node_id: row.try_get("side_b_node_id").map_err(ApiError::from_db)?,
+        length_m: row.try_get("length_m").map_err(ApiError::from_db)?,
+        max_slope_pct: row.try_get("max_slope_pct").map_err(ApiError::from_db)?,
+        transfer_mode: row.try_get("transfer_mode").map_err(ApiError::from_db)?,
+        max_safe_ivv: row.try_get("max_safe_ivv").map_err(ApiError::from_db)?,
+        is_verified_safe: row.try_get("is_verified_safe").map_err(ApiError::from_db)?,
+        last_inspected_at: row
+            .try_get("last_inspected_at")
+            .map_err(ApiError::from_db)?,
+        inspection_valid_days: row
+            .try_get("inspection_valid_days")
+            .map_err(ApiError::from_db)?,
+        requires_revalidation: row
+            .try_get("requires_revalidation")
+            .map_err(ApiError::from_db)?,
+        cargo_types,
     }))
 }

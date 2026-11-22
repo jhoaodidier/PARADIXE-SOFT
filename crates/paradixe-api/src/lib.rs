@@ -4,11 +4,14 @@ pub mod auth;
 pub mod config;
 pub mod corridors;
 pub mod error;
+pub mod events;
 pub mod fixtures;
 pub mod incidents;
+pub mod ops;
 pub mod routing;
 pub mod simulator;
 pub mod sync;
+pub mod uploads;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -16,16 +19,26 @@ use std::sync::{Arc, Mutex};
 
 use axum::{
     extract::State,
-    http::{header, StatusCode},
+    http::{header, HeaderValue, StatusCode},
     response::IntoResponse,
-    routing::{get, patch, post},
+    routing::{delete, get, patch, post},
     Json, Router,
 };
 use serde_json::json;
 use sqlx::PgPool;
-use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer, trace::TraceLayer};
+use tokio::sync::broadcast;
+use tower_http::{
+    cors::{AllowOrigin, CorsLayer},
+    limit::RequestBodyLimitLayer,
+    trace::TraceLayer,
+};
 
-use crate::{auth::RateLimiter, config::AppConfig, incidents::DailyTelemetryKeyStore};
+use crate::{
+    auth::RateLimiter,
+    config::AppConfig,
+    events::{ApiMetrics, OperationalEvent},
+    incidents::DailyTelemetryKeyStore,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotificationChannel {
@@ -105,6 +118,9 @@ pub struct AppState {
     pub telemetry_keys: DailyTelemetryKeyStore,
     pub gateway: Arc<dyn NotificationGateway>,
     pub sim_gateway: Arc<SimulationNotificationGateway>,
+    pub event_tx: broadcast::Sender<OperationalEvent>,
+    pub metrics: Arc<ApiMetrics>,
+    pub http_client: reqwest::Client,
 }
 
 const OPENAPI_SPEC_JSON: &str = include_str!("../../../openapi/openapi-v1.json");
@@ -139,21 +155,56 @@ async fn openapi_handler() -> impl IntoResponse {
     )
 }
 
+fn build_cors_layer(allowed_origins: &[String]) -> CorsLayer {
+    if allowed_origins.is_empty() {
+        CorsLayer::permissive()
+    } else {
+        let parsed: Vec<HeaderValue> = allowed_origins
+            .iter()
+            .filter_map(|origin| HeaderValue::from_str(origin).ok())
+            .collect();
+        if parsed.is_empty() {
+            CorsLayer::permissive()
+        } else {
+            CorsLayer::new()
+                .allow_origin(AllowOrigin::list(parsed))
+                .allow_methods([
+                    http::Method::GET,
+                    http::Method::POST,
+                    http::Method::PATCH,
+                    http::Method::DELETE,
+                    http::Method::OPTIONS,
+                ])
+                .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+        }
+    }
+}
+
 pub fn build_router(state: AppState) -> Router {
+    let cors = build_cors_layer(&state.config.cors_allowed_origins);
+
     let api_v1 = Router::new()
         .route("/openapi.json", get(openapi_handler))
-        // Auth (6)
+        // Auth & Admin Users
         .route("/auth/otp/request", post(auth::request_otp))
+        .route("/auth/register", post(auth::register_driver))
         .route("/auth/login", post(auth::login))
         .route("/auth/refresh", post(auth::refresh_session))
         .route("/auth/logout", post(auth::logout))
         .route("/auth/revoke-all", post(auth::revoke_all_sessions))
         .route("/auth/me", get(auth::get_me))
-        // Sync (2)
+        .route(
+            "/admin/users",
+            get(auth::list_users).post(auth::create_admin_user),
+        )
+        // Sync & Realtime Events
         .route("/sync/snapshot", get(sync::get_sync_snapshot))
         .route("/sync/batch", post(sync::post_sync_batch))
-        // Corridors, Regions, Nodes & IVV
+        .route("/events/stream", get(events::events_stream_handler))
+        // Corridors, Regions, Nodes, Forecasts & Analytics
         .route("/corridors/map", get(corridors::get_corridors_map))
+        .route("/corridors/forecast", get(ops::get_corridor_forecast))
+        .route("/analytics/summary", get(ops::get_analytics_summary))
         .route("/regions", get(corridors::get_regions))
         .route("/nodes", get(corridors::list_nodes))
         .route(
@@ -165,7 +216,19 @@ pub fn build_router(state: AppState) -> Router {
             post(corridors::verify_corridor_batch_attributes),
         )
         .route("/ivv/recalculate", post(corridors::recalculate_ivv))
-        // Telemetry, Field Reports, Webhooks & Incidents (5)
+        // Evidence Uploads
+        .route("/uploads/presign", post(uploads::presign_upload))
+        .route("/uploads/evidence", post(uploads::upload_evidence))
+        // Fleet Alert Subscriptions
+        .route(
+            "/subscriptions",
+            get(ops::list_subscriptions).post(ops::create_subscription),
+        )
+        .route(
+            "/subscriptions/{subscription_id}",
+            delete(ops::delete_subscription),
+        )
+        // Telemetry, Field Reports, Webhooks & Incidents
         .route("/telemetry/pings", post(incidents::ingest_telemetry_pings))
         .route("/reports", post(incidents::create_field_report))
         .route(
@@ -177,11 +240,19 @@ pub fn build_router(state: AppState) -> Router {
             "/incidents/{incident_id}/verification",
             patch(incidents::verify_incident),
         )
-        // Routing, Logistic Bridges & Humanitarian Windows (5)
+        // Routing, Transfer Corridors, Logistic Bridges & Humanitarian Windows
         .route("/routing/calculate", post(routing::calculate_route_handler))
         .route(
             "/operations/bridges",
             get(routing::list_bridges_and_windows),
+        )
+        .route(
+            "/transfer-corridors",
+            post(routing::create_transfer_corridor),
+        )
+        .route(
+            "/transfer-corridors/{corridor_id}/inspect",
+            patch(routing::inspect_transfer_corridor),
         )
         .route("/bridges", post(routing::propose_logistic_bridge))
         .route(
@@ -192,7 +263,7 @@ pub fn build_router(state: AppState) -> Router {
             "/incidents/{incident_id}/humanitarian-windows",
             post(routing::create_humanitarian_window),
         )
-        // Isolated Simulator (5)
+        // Isolated Simulator
         .route(
             "/simulator/scenarios",
             post(simulator::create_simulation_scenario),
@@ -216,8 +287,9 @@ pub fn build_router(state: AppState) -> Router {
 
     Router::new()
         .route("/health", get(health_handler))
+        .route("/metrics", get(events::metrics_handler))
         .nest("/api/v1", api_v1)
-        .layer(RequestBodyLimitLayer::new(2 * 1024 * 1024))
+        .layer(RequestBodyLimitLayer::new(3 * 1024 * 1024))
         // Privacy guard (SEC-07): log method and path only — never headers, JWTs, query params, or bodies.
         .layer(
             TraceLayer::new_for_http().make_span_with(|req: &http::Request<_>| {
@@ -228,6 +300,6 @@ pub fn build_router(state: AppState) -> Router {
                 )
             }),
         )
-        .layer(CorsLayer::permissive())
+        .layer(cors)
         .with_state(state)
 }

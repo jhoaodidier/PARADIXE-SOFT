@@ -71,11 +71,15 @@ services:
       OTP_SECRET: ${OTP_SECRET:?Set OTP_SECRET}
       WHATSAPP_WEBHOOK_SECRET: ${WHATSAPP_WEBHOOK_SECRET:?Set WHATSAPP_WEBHOOK_SECRET}
       TELEMETRY_KEY_STORE_DIR: /app/telemetry_keys
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      MESSAGING_INTERNAL_URL: http://messaging:8090
       S3_ENDPOINT: http://rustfs:9000
       S3_REGION: us-east-1
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
       S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_BUCKET_TILES: ${S3_BUCKET_TILES:-paradixe-tiles}
+      S3_BUCKET_EVIDENCE: ${S3_BUCKET_EVIDENCE:-paradixe-evidence}
+      S3_PUBLIC_EVIDENCE_BASE: ${S3_PUBLIC_EVIDENCE_BASE:-/evidence}
     volumes:
       - paradixe_prod_telemetry_keys:/app/telemetry_keys
     healthcheck:

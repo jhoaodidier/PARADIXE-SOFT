@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod dem;
+pub mod hotspots;
 pub mod osm;
 pub mod pbf_download;
 pub mod pmtiles_writer;
@@ -91,7 +92,25 @@ enum Commands {
         #[arg(long)]
         skip_upload: bool,
     },
-    /// Execute full regional onboarding pipeline: OSM -> DEM -> Weather/IVV -> PMTiles v3 on RustFS/S3
+    /// Mark INGEMMET/Provias documented historical landslide hotspots and soil susceptibility
+    HotspotsSync {
+        #[arg(long)]
+        region: Option<String>,
+        #[arg(long)]
+        bbox: Option<String>,
+        #[arg(long)]
+        region_name: Option<String>,
+    },
+    /// Generate +24h/+48h/+72h predictive IVV risk forecasts from Open-Meteo rainfall forecasts
+    ForecastSync {
+        #[arg(long)]
+        region: Option<String>,
+        #[arg(long)]
+        bbox: Option<String>,
+        #[arg(long)]
+        region_name: Option<String>,
+    },
+    /// Execute full regional onboarding pipeline: OSM -> DEM -> Hotspots -> Weather/IVV/Forecast -> PMTiles v3 on RustFS/S3
     SyncAll {
         #[arg(long, default_value = "PE-HUC")]
         region: String,
@@ -224,11 +243,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             loop {
                 let stats = weather::sync_weather_and_ivv(&pool, reg.as_ref()).await?;
                 tracing::info!(?stats, "Weather IVV sync completed");
+                let forecast_stats = weather::sync_weather_forecasts(&pool, reg.as_ref()).await?;
+                tracing::info!(
+                    ?forecast_stats,
+                    "Predictive 72h IVV forecast sync completed"
+                );
                 if once {
                     break;
                 }
                 tokio::time::sleep(Duration::from_secs(interval_hours.max(1) * 3600)).await;
             }
+        }
+        Commands::HotspotsSync {
+            region,
+            bbox,
+            region_name,
+        } => {
+            let reg = match region {
+                Some(r) => Some(regions::resolve_region(
+                    &r,
+                    bbox.as_deref(),
+                    region_name.as_deref(),
+                )?),
+                None => None,
+            };
+            let stats = hotspots::sync_historical_hotspots(&pool, reg.as_ref()).await?;
+            tracing::info!(?stats, "Andean geotechnical hotspots sync completed");
+        }
+        Commands::ForecastSync {
+            region,
+            bbox,
+            region_name,
+        } => {
+            let reg = match region {
+                Some(r) => Some(regions::resolve_region(
+                    &r,
+                    bbox.as_deref(),
+                    region_name.as_deref(),
+                )?),
+                None => None,
+            };
+            let stats = weather::sync_weather_forecasts(&pool, reg.as_ref()).await?;
+            tracing::info!(?stats, "Predictive 72h IVV forecast sync completed");
         }
         Commands::TilesPublish {
             region,
@@ -276,8 +332,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 dem::enrich_dem_elevations_and_slopes(&pool, &reg, false, max_nodes).await?;
             tracing::info!(nodes_up, segs_up, "Step 2/4 DEM enrichment completed");
 
+            let hotspot_stats = hotspots::sync_historical_hotspots(&pool, Some(&reg)).await?;
+            tracing::info!(?hotspot_stats, "Andean geotechnical hotspots marked");
+
             let weather_stats = weather::sync_weather_and_ivv(&pool, Some(&reg)).await?;
             tracing::info!(?weather_stats, "Step 3/4 Weather IVV sync completed");
+
+            let forecast_stats = weather::sync_weather_forecasts(&pool, Some(&reg)).await?;
+            tracing::info!(
+                ?forecast_stats,
+                "Predictive 72h IVV forecast sync completed"
+            );
 
             let (out_path, tile_count, byte_len, uri) =
                 publish_tiles_step(&pool, &reg, min_zoom, max_zoom, None, false).await?;

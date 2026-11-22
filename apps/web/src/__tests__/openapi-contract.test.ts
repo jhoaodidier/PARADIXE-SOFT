@@ -14,9 +14,9 @@ describe("Contrato OpenAPI 3.1 PARADIXE SOFT", () => {
   const specPath = resolve(process.cwd(), "../../openapi/openapi-v1.json");
   const spec = JSON.parse(readFileSync(specPath, "utf-8")) as OpenApiDoc;
 
-  it("declara version OpenAPI 3.1.0 y las 22 rutas canonicas de /api/v1", () => {
+  it("declara version OpenAPI 3.1.0, las 22 rutas canonicas y las extensiones operativas de /api/v1", () => {
     expect(spec.openapi).toBe("3.1.0");
-    const expectedPaths = [
+    const corePaths = [
       "/auth/otp/request",
       "/auth/login",
       "/auth/refresh",
@@ -40,10 +40,30 @@ describe("Contrato OpenAPI 3.1 PARADIXE SOFT", () => {
       "/simulator/scenarios/{scenario_id}/evaluate",
       "/simulator/scenarios/{scenario_id}/impact",
     ];
-    for (const path of expectedPaths) {
+    const extendedPaths = [
+      "/auth/register",
+      "/auth/me",
+      "/admin/users",
+      "/regions",
+      "/nodes",
+      "/segments/{segment_id}/attributes",
+      "/corridors/verify-attributes",
+      "/corridors/forecast",
+      "/analytics/summary",
+      "/events/stream",
+      "/uploads/presign",
+      "/uploads/evidence",
+      "/subscriptions",
+      "/subscriptions/{subscription_id}",
+      "/incidents",
+      "/operations/bridges",
+      "/transfer-corridors",
+      "/transfer-corridors/{corridor_id}/inspect",
+    ];
+    for (const path of [...corePaths, ...extendedPaths]) {
       expect(spec.paths[path]).toBeDefined();
     }
-    expect(Object.keys(spec.paths)).toHaveLength(22);
+    expect(Object.keys(spec.paths).length).toBeGreaterThanOrEqual(40);
   });
 
   it("incluye los 11 reason_code de NO_SAFE_ROUTE y esquemas discriminados estrictos", () => {

@@ -16,6 +16,7 @@ use paradixe_api::{
     auth::{compute_otp_hmac_hex, encode_access_token, hash_password, RoleCode},
     build_router,
     config::AppConfig,
+    events::{ApiMetrics, OperationalEvent},
     fixtures::{
         DRILL_FIXTURE_TAG, NODE_AMBO_ID, NODE_CARPISH_NORTE_ID, NODE_CARPISH_SUR_ID,
         NODE_HUANUCO_ID, NODE_TINGO_MARIA_ID, SEG_BYPASS_AMBO_ID, SEG_BYPASS_TINGO_ID,
@@ -67,6 +68,14 @@ async fn setup_harness() -> TestHarness {
         otp_secret: SecretString::from("test_otp_secret_at_least_32_bytes_for_postgis_suite!!"),
         webhook_secret: SecretString::from("test_webhook_secret_at_least_32_bytes!!"),
         telemetry_key_store_dir: key_dir.clone(),
+        cors_allowed_origins: Vec::new(),
+        messaging_internal_url: None,
+        s3_endpoint: "http://127.0.0.1:9000".to_string(),
+        s3_region: "us-east-1".to_string(),
+        s3_access_key: "rustfsadmin".to_string(),
+        s3_secret_key: SecretString::from("rustfsadmin_dev_only"),
+        s3_bucket_evidence: "paradixe-evidence".to_string(),
+        s3_public_evidence_base: "/evidence".to_string(),
     });
 
     let pool = PgPoolOptions::new()
@@ -101,6 +110,7 @@ async fn setup_harness() -> TestHarness {
         .await
         .expect("reset sync_control");
 
+    let (event_tx, _) = tokio::sync::broadcast::channel::<OperationalEvent>(64);
     let telemetry_keys = DailyTelemetryKeyStore::new(key_dir.clone()).expect("key store");
     let state = AppState {
         pool: pool.clone(),
@@ -110,6 +120,9 @@ async fn setup_harness() -> TestHarness {
         telemetry_keys,
         gateway: Arc::new(OperationalPreviewGateway),
         sim_gateway: Arc::new(SimulationNotificationGateway::default()),
+        event_tx,
+        metrics: Arc::new(ApiMetrics::default()),
+        http_client: reqwest::Client::new(),
     };
 
     TestHarness {

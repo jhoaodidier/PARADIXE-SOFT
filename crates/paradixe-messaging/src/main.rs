@@ -39,9 +39,9 @@ enum Commands {
         segment_id: Uuid,
         #[arg(long, default_value = "BLOCKED")]
         passability: String,
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         lat: f64,
-        #[arg(long)]
+        #[arg(long, allow_hyphen_values = true)]
         lon: f64,
     },
 }
